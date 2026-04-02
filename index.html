@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frog Legends - Turn-Based Battle</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a1a;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  overflow: hidden;
+}
+canvas { display: block; cursor: default; image-rendering: pixelated; }
+#gameContainer {
+  position: relative;
+  border: 3px solid #2a2a4a;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 60px rgba(100, 60, 255, 0.3);
+}
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <canvas id="gameCanvas" width="960" height="640"></canvas>
+</div>
+
+<script>
+// ============================================================
+//  FROG LEGENDS — Axie-style Turn-Based Battle
+// ============================================================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ---- Sprite sheet frame data (from manifest.json bbox) ----
+const FRAME_DATA_6 = [
+  { x: 19, y: 30, w: 77, h: 57 },
+  { x: 147, y: 29, w: 77, h: 57 },
+  { x: 276, y: 29, w: 77, h: 57 },
+  { x: 405, y: 30, w: 77, h: 57 },
+  { x: 533, y: 31, w: 77, h: 57 },
+  { x: 659, y: 31, w: 77, h: 57 },
+];
+
+// ---- Asset loading ----
+const images = {};
+const imageSources = {
+  player: 'sprites/ember/ember_sheet_6frame.png',
+  enemy:  'sprites/toxic/toxic_sheet_6frame.png',
+  frost:  'sprites/frost/frost_sheet_6frame.png',
+};
+let loadedCount = 0;
+const totalImages = Object.keys(imageSources).length;
+
+for (const [key, src] of Object.entries(imageSources)) {
+  const img = new Image();
+  img.onload = () => { loadedCount++; if (loadedCount >= totalImages) init(); };
+  img.onerror = () => { console.error('Failed to load', src); };
+  img.src = src;
+  images[key] = img;
+}
+
+// ---- Game state ----
+const ENERGY_MAX = 4;
+let gameState = 'loading'; // loading, battle, playerTurn, enemyTurn, animating, win, lose
+let turnNumber = 0;
+
+const CARDS = [
+  { name: 'Slash',     cost: 1, dmg: 18, type: 'attack',  color: '#ff6644', icon: '⚔️',  desc: 'Basic attack' },
+  { name: 'Fireball',  cost: 2, dmg: 35, type: 'attack',  color: '#ff4422', icon: '🔥',  desc: 'Heavy fire damage' },
+  { name: 'Heal',      cost: 2, dmg: -25,type: 'heal',    color: '#44dd66', icon: '💚',  desc: 'Restore 25 HP' },
+  { name: 'Shield',    cost: 1, dmg: 0,  type: 'shield',  color: '#4488ff', icon: '🛡️',  desc: 'Block 15 damage' },
+  { name: 'Venom',     cost: 2, dmg: 15, type: 'poison',  color: '#aa44ff', icon: '☠️',  desc: '15 dmg + 8 poison/turn' },
+  { name: 'Bite',      cost: 1, dmg: 12, type: 'attack',  color: '#ffaa22', icon: '🦷',  desc: 'Quick bite' },
+  { name: 'Drain',     cost: 3, dmg: 30, type: 'drain',   color: '#ff44aa', icon: '🩸',  desc: 'Deal 30, heal 15' },
+  { name: 'Rage',      cost: 0, dmg: 0,  type: 'buff',    color: '#ff8800', icon: '💢',  desc: '+50% dmg next attack' },
+];
+
+function createFighter(name, hp, isPlayer) {
+  return {
+    name, hp, maxHp: hp, shield: 0, poison: 0, rage: false,
+    x: isPlayer ? 180 : 720, y: 320,
+    baseX: isPlayer ? 180 : 720, baseY: 320,
+    scale: 3.0, frame: 0, frameTimer: 0, animSpeed: 120,
+    isPlayer, shakeX: 0, shakeY: 0, flash: 0, flashColor: '#fff',
+    hitAnim: 0,
+  };
+}
+
+let player, enemy, energy, hand, deck, discardPile;
+let particles = [];
+let floatingTexts = [];
+let animations = [];
+let selectedCard = -1;
+let hoveredCard = -1;
+let endTurnHovered = false;
+
+// ---- Particle system ----
+class Particle {
+  constructor(x, y, vx, vy, color, life, size, type = 'circle') {
+    Object.assign(this, { x, y, vx, vy, color, life, maxLife: life, size, type, alpha: 1, rotation: Math.random() * Math.PI * 2 });
+  }
+  update(dt) {
+    this.x += this.vx * dt / 16;
+    this.y += this.vy * dt / 16;
+    this.vy += 0.1 * dt / 16; // gravity
+    this.life -= dt;
+    this.alpha = Math.max(0, this.life / this.maxLife);
+    return this.life > 0;
+  }
+  draw() {
+    ctx.save();
+    ctx.globalAlpha = this.alpha;
+    ctx.fillStyle = this.color;
+    if (this.type === 'circle') {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size * this.alpha, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (this.type === 'star') {
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.rotation + this.life * 0.01);
+      drawStar(0, 0, this.size * this.alpha, this.size * 0.4 * this.alpha, 5);
+      ctx.fill();
+    } else if (this.type === 'spark') {
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y);
+      ctx.lineTo(this.x - this.vx * 3, this.y - this.vy * 3);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function drawStar(cx, cy, outerR, innerR, points) {
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const a = (i * Math.PI) / points - Math.PI / 2;
+    if (i === 0) ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+    else ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+  }
+  ctx.closePath();
+}
+
+function spawnParticles(x, y, count, color, type = 'circle', spread = 5) {
+  for (let i = 0; i < count; i++) {
+    particles.push(new Particle(
+      x + (Math.random() - 0.5) * 30,
+      y + (Math.random() - 0.5) * 30,
+      (Math.random() - 0.5) * spread,
+      (Math.random() - 1) * spread,
+      color,
+      500 + Math.random() * 500,
+      3 + Math.random() * 5,
+      type
+    ));
+  }
+}
+
+function spawnDamageText(x, y, text, color) {
+  floatingTexts.push({
+    x: x + (Math.random() - 0.5) * 40,
+    y, text, color,
+    vy: -2.5, life: 1200, maxLife: 1200, scale: 1.5
+  });
+}
+
+// ---- Deck management ----
+function buildDeck() {
+  deck = [];
+  for (let i = 0; i < 3; i++) {
+    for (const card of CARDS) {
+      deck.push({ ...card });
+    }
+  }
+  shuffleArray(deck);
+}
+
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function drawCards(count) {
+  for (let i = 0; i < count; i++) {
+    if (deck.length === 0) {
+      deck = [...discardPile];
+      discardPile = [];
+      shuffleArray(deck);
+    }
+    if (deck.length > 0 && hand.length < 8) {
+      hand.push(deck.pop());
+    }
+  }
+}
+
+// ---- Init ----
+function init() {
+  player = createFighter('Ember Frog', 120, true);
+  enemy = createFighter('Toxic Frog', 100, false);
+  energy = ENERGY_MAX;
+  hand = [];
+  discardPile = [];
+  particles = [];
+  floatingTexts = [];
+  animations = [];
+  selectedCard = -1;
+  turnNumber = 0;
+  buildDeck();
+  startPlayerTurn();
+  gameState = 'playerTurn';
+  requestAnimationFrame(gameLoop);
+}
+
+function startPlayerTurn() {
+  turnNumber++;
+  energy = ENERGY_MAX;
+  drawCards(4);
+  // apply poison
+  if (player.poison > 0) {
+    applyDamage(player, player.poison, '#aa44ff');
+    spawnParticles(player.x, player.y, 8, '#aa44ff', 'circle');
+    spawnDamageText(player.x, player.y - 60, `${player.poison} PSN`, '#cc66ff');
+    player.poison = Math.max(0, player.poison - 2);
+  }
+}
+
+function applyDamage(target, dmg, color = '#ff4444') {
+  if (target.shield > 0) {
+    const blocked = Math.min(target.shield, dmg);
+    target.shield -= blocked;
+    dmg -= blocked;
+    if (blocked > 0) {
+      spawnDamageText(target.x, target.y - 80, `${blocked} BLOCKED`, '#4488ff');
+      spawnParticles(target.x, target.y, 6, '#4488ff', 'star');
+    }
+  }
+  if (dmg > 0) {
+    target.hp = Math.max(0, target.hp - dmg);
+    target.flash = 200;
+    target.flashColor = color;
+    target.shakeX = 10;
+    target.hitAnim = 300;
+  }
+}
+
+function playCard(cardIndex) {
+  if (gameState !== 'playerTurn') return;
+  const card = hand[cardIndex];
+  if (!card || card.cost > energy) return;
+
+  energy -= card.cost;
+  hand.splice(cardIndex, 1);
+  selectedCard = -1;
+  let dmg = card.dmg;
+
+  if (player.rage && card.type === 'attack') {
+    dmg = Math.floor(dmg * 1.5);
+    player.rage = false;
+    spawnDamageText(player.x, player.y - 90, 'RAGE!', '#ff8800');
+  }
+
+  // Attack animation
+  gameState = 'animating';
+  const origX = player.x;
+
+  switch (card.type) {
+    case 'attack':
+      animateAttack(player, enemy, () => {
+        applyDamage(enemy, dmg);
+        spawnDamageText(enemy.x, enemy.y - 60, `-${dmg}`, '#ff4444');
+        spawnParticles(enemy.x, enemy.y, 15, card.color, 'spark', 8);
+        spawnParticles(enemy.x, enemy.y, 10, '#ffaa00', 'star');
+        discardPile.push(card);
+        checkWinLose();
+      });
+      break;
+    case 'heal':
+      player.hp = Math.min(player.maxHp, player.hp + Math.abs(card.dmg));
+      spawnDamageText(player.x, player.y - 60, `+${Math.abs(card.dmg)}`, '#44dd66');
+      spawnParticles(player.x, player.y, 20, '#44ff66', 'circle', 4);
+      spawnParticles(player.x, player.y, 10, '#88ffaa', 'star', 3);
+      discardPile.push(card);
+      setTimeout(() => { gameState = 'playerTurn'; }, 400);
+      break;
+    case 'shield':
+      player.shield += 15;
+      spawnDamageText(player.x, player.y - 60, '+15 🛡️', '#4488ff');
+      spawnParticles(player.x, player.y, 15, '#4488ff', 'star', 3);
+      discardPile.push(card);
+      setTimeout(() => { gameState = 'playerTurn'; }, 400);
+      break;
+    case 'poison':
+      animateAttack(player, enemy, () => {
+        applyDamage(enemy, dmg);
+        enemy.poison += 8;
+        spawnDamageText(enemy.x, enemy.y - 60, `-${dmg}`, '#aa44ff');
+        spawnDamageText(enemy.x, enemy.y - 90, '+8 PSN', '#cc66ff');
+        spawnParticles(enemy.x, enemy.y, 20, '#aa44ff', 'circle', 6);
+        spawnParticles(enemy.x, enemy.y, 8, '#66ff44', 'circle', 4);
+        discardPile.push(card);
+        checkWinLose();
+      });
+      break;
+    case 'drain':
+      animateAttack(player, enemy, () => {
+        applyDamage(enemy, dmg);
+        player.hp = Math.min(player.maxHp, player.hp + 15);
+        spawnDamageText(enemy.x, enemy.y - 60, `-${dmg}`, '#ff44aa');
+        spawnDamageText(player.x, player.y - 60, `+15`, '#44dd66');
+        spawnParticles(enemy.x, enemy.y, 12, '#ff44aa', 'spark', 6);
+        spawnParticles(player.x, player.y, 10, '#44ff66', 'circle', 3);
+        discardPile.push(card);
+        checkWinLose();
+      });
+      break;
+    case 'buff':
+      player.rage = true;
+      spawnDamageText(player.x, player.y - 60, 'RAGE! +50%', '#ff8800');
+      spawnParticles(player.x, player.y, 20, '#ff8800', 'star', 5);
+      spawnParticles(player.x, player.y, 10, '#ffcc00', 'circle', 3);
+      discardPile.push(card);
+      setTimeout(() => { gameState = 'playerTurn'; }, 400);
+      break;
+  }
+}
+
+function animateAttack(attacker, target, onHit) {
+  const startX = attacker.x;
+  const targetX = target.x + (attacker.isPlayer ? -80 : 80);
+  const dur = 300;
+  const start = performance.now();
+
+  function step(now) {
+    const t = Math.min(1, (now - start) / dur);
+    const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    attacker.x = startX + (targetX - startX) * ease;
+
+    if (t >= 1) {
+      onHit();
+      // return animation
+      const retStart = performance.now();
+      function retStep(now2) {
+        const t2 = Math.min(1, (now2 - retStart) / 200);
+        attacker.x = targetX + (startX - targetX) * t2;
+        if (t2 >= 1) {
+          attacker.x = startX;
+          setTimeout(() => {
+            if (gameState === 'animating') gameState = 'playerTurn';
+          }, 100);
+          return;
+        }
+        requestAnimationFrame(retStep);
+      }
+      requestAnimationFrame(retStep);
+      return;
+    }
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function animateEnemyAttack(attacker, target, onHit, callback) {
+  const startX = attacker.x;
+  const targetX = target.x + (attacker.isPlayer ? -80 : 80);
+  const dur = 300;
+  const start = performance.now();
+
+  function step(now) {
+    const t = Math.min(1, (now - start) / dur);
+    const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    attacker.x = startX + (targetX - startX) * ease;
+
+    if (t >= 1) {
+      onHit();
+      const retStart = performance.now();
+      function retStep(now2) {
+        const t2 = Math.min(1, (now2 - retStart) / 200);
+        attacker.x = targetX + (startX - targetX) * t2;
+        if (t2 >= 1) {
+          attacker.x = startX;
+          setTimeout(callback, 200);
+          return;
+        }
+        requestAnimationFrame(retStep);
+      }
+      requestAnimationFrame(retStep);
+      return;
+    }
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function checkWinLose() {
+  if (enemy.hp <= 0) {
+    setTimeout(() => { gameState = 'win'; }, 800);
+  } else if (player.hp <= 0) {
+    setTimeout(() => { gameState = 'lose'; }, 800);
+  }
+}
+
+function endTurn() {
+  if (gameState !== 'playerTurn') return;
+  // discard remaining hand
+  discardPile.push(...hand);
+  hand = [];
+  selectedCard = -1;
+  gameState = 'enemyTurn';
+  setTimeout(enemyTurn, 600);
+}
+
+// ---- Enemy AI ----
+function enemyTurn() {
+  // Apply poison to enemy
+  if (enemy.poison > 0) {
+    applyDamage(enemy, enemy.poison, '#aa44ff');
+    spawnParticles(enemy.x, enemy.y, 8, '#aa44ff', 'circle');
+    spawnDamageText(enemy.x, enemy.y - 60, `${enemy.poison} PSN`, '#cc66ff');
+    enemy.poison = Math.max(0, enemy.poison - 2);
+    if (enemy.hp <= 0) { checkWinLose(); return; }
+  }
+
+  // AI decides action
+  const hpPercent = enemy.hp / enemy.maxHp;
+  const actions = [];
+
+  if (hpPercent < 0.35) {
+    actions.push({ name: 'Heal', type: 'heal', dmg: 20 });
+  }
+  if (Math.random() > 0.6) {
+    actions.push({ name: 'Venom Spit', type: 'poison', dmg: 12, poisonAmt: 6 });
+  }
+  actions.push({ name: 'Claw', type: 'attack', dmg: 14 + Math.floor(Math.random() * 8) });
+  if (Math.random() > 0.7) {
+    actions.push({ name: 'Shield', type: 'shield', amt: 10 });
+  }
+
+  // Pick best action
+  let action;
+  if (hpPercent < 0.35 && actions.find(a => a.type === 'heal')) {
+    action = actions.find(a => a.type === 'heal');
+  } else {
+    action = actions[Math.floor(Math.random() * actions.length)];
+  }
+
+  gameState = 'animating';
+
+  switch (action.type) {
+    case 'attack':
+      animateEnemyAttack(enemy, player, () => {
+        applyDamage(player, action.dmg);
+        spawnDamageText(player.x, player.y - 60, `-${action.dmg}`, '#ff4444');
+        spawnParticles(player.x, player.y, 15, '#ff6644', 'spark', 8);
+        checkWinLose();
+      }, () => {
+        if (gameState === 'animating') {
+          gameState = 'playerTurn';
+          startPlayerTurn();
+        }
+      });
+      break;
+    case 'heal':
+      enemy.hp = Math.min(enemy.maxHp, enemy.hp + action.dmg);
+      spawnDamageText(enemy.x, enemy.y - 60, `+${action.dmg}`, '#44dd66');
+      spawnParticles(enemy.x, enemy.y, 15, '#44ff66', 'circle', 4);
+      setTimeout(() => {
+        if (gameState === 'animating') {
+          gameState = 'playerTurn';
+          startPlayerTurn();
+        }
+      }, 800);
+      break;
+    case 'poison':
+      animateEnemyAttack(enemy, player, () => {
+        applyDamage(player, action.dmg);
+        player.poison += action.poisonAmt;
+        spawnDamageText(player.x, player.y - 60, `-${action.dmg}`, '#aa44ff');
+        spawnDamageText(player.x, player.y - 90, `+${action.poisonAmt} PSN`, '#cc66ff');
+        spawnParticles(player.x, player.y, 15, '#aa44ff', 'circle', 6);
+        checkWinLose();
+      }, () => {
+        if (gameState === 'animating') {
+          gameState = 'playerTurn';
+          startPlayerTurn();
+        }
+      });
+      break;
+    case 'shield':
+      enemy.shield += action.amt;
+      spawnDamageText(enemy.x, enemy.y - 60, `+${action.amt} 🛡️`, '#4488ff');
+      spawnParticles(enemy.x, enemy.y, 12, '#4488ff', 'star', 3);
+      setTimeout(() => {
+        if (gameState === 'animating') {
+          gameState = 'playerTurn';
+          startPlayerTurn();
+        }
+      }, 800);
+      break;
+  }
+}
+
+// ---- Drawing ----
+function drawBackground() {
+  // Gradient sky
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#1a1a3e');
+  grad.addColorStop(0.5, '#2d1b4e');
+  grad.addColorStop(1, '#0d2137');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Arena floor
+  ctx.save();
+  ctx.fillStyle = '#1a2a1a';
+  ctx.beginPath();
+  ctx.ellipse(480, 420, 420, 80, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#2a4a2a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(480, 420, 420, 80, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Inner ring
+  ctx.strokeStyle = '#334433';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(480, 420, 300, 55, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // Ambient particles
+  const t = performance.now() * 0.001;
+  ctx.globalAlpha = 0.3;
+  for (let i = 0; i < 15; i++) {
+    const px = 100 + (i * 67) % 760;
+    const py = 50 + Math.sin(t + i * 1.3) * 30 + (i * 37) % 300;
+    ctx.fillStyle = i % 3 === 0 ? '#ffaa44' : i % 3 === 1 ? '#44aaff' : '#aa44ff';
+    ctx.beginPath();
+    ctx.arc(px, py, 1.5 + Math.sin(t * 2 + i) * 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawSprite(fighter, imgKey) {
+  const img = images[imgKey];
+  if (!img) return;
+
+  const fd = FRAME_DATA_6[fighter.frame];
+  ctx.save();
+
+  const dx = fighter.x + fighter.shakeX;
+  const dy = fighter.y + fighter.shakeY;
+
+  // Shadow
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(dx, dy + fd.h * fighter.scale / 2 + 10, 40, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.translate(dx, dy);
+
+  // Mirror enemy
+  if (!fighter.isPlayer) {
+    ctx.scale(-1, 1);
+  }
+
+  // Hit flash
+  if (fighter.flash > 0) {
+    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(fighter.flash * 0.05);
+  }
+
+  // Draw bouncing idle
+  const bounce = Math.sin(performance.now() * 0.003 + (fighter.isPlayer ? 0 : Math.PI)) * 4;
+
+  ctx.drawImage(
+    img,
+    fd.x, fd.y, fd.w, fd.h,
+    -fd.w * fighter.scale / 2, -fd.h * fighter.scale / 2 + bounce,
+    fd.w * fighter.scale, fd.h * fighter.scale
+  );
+
+  // Flash overlay
+  if (fighter.flash > 0) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = fighter.flashColor;
+    ctx.globalAlpha = fighter.flash / 400;
+    ctx.fillRect(-fd.w * fighter.scale / 2, -fd.h * fighter.scale / 2 + bounce,
+      fd.w * fighter.scale, fd.h * fighter.scale);
+  }
+
+  ctx.restore();
+
+  // Shield aura
+  if (fighter.shield > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.2 + 0.1 * Math.sin(performance.now() * 0.005);
+    ctx.strokeStyle = '#44aaff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(dx, dy, 60, 50, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = '#44aaff';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Poison indicator
+  if (fighter.poison > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    for (let i = 0; i < 3; i++) {
+      const px = dx - 20 + i * 20;
+      const py = dy + 50 + Math.sin(performance.now() * 0.003 + i) * 5;
+      ctx.fillStyle = '#aa44ff';
+      ctx.beginPath();
+      ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Rage indicator
+  if (fighter.rage) {
+    ctx.save();
+    ctx.globalAlpha = 0.4 + 0.2 * Math.sin(performance.now() * 0.01);
+    ctx.strokeStyle = '#ff6600';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(dx, dy, 65, 55, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawHPBar(fighter, x, y, width) {
+  const barH = 22;
+  const hpPct = Math.max(0, fighter.hp / fighter.maxHp);
+  const hpColor = hpPct > 0.5 ? '#44dd66' : hpPct > 0.25 ? '#ddaa44' : '#dd4444';
+
+  // Background
+  ctx.fillStyle = '#1a1a2a';
+  ctx.strokeStyle = '#444466';
+  ctx.lineWidth = 2;
+  roundRect(x, y, width, barH, 6, true, true);
+
+  // HP fill
+  if (hpPct > 0) {
+    const grad = ctx.createLinearGradient(x, y, x, y + barH);
+    grad.addColorStop(0, hpColor);
+    grad.addColorStop(1, shadeColor(hpColor, -30));
+    ctx.fillStyle = grad;
+    roundRect(x + 2, y + 2, (width - 4) * hpPct, barH - 4, 4, true, false);
+  }
+
+  // Shield overlay
+  if (fighter.shield > 0) {
+    ctx.fillStyle = 'rgba(68, 136, 255, 0.4)';
+    const shieldPct = Math.min(1, fighter.shield / 30);
+    roundRect(x + 2, y + 2, (width - 4) * shieldPct, barH - 4, 4, true, false);
+  }
+
+  // Text
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 13px "Segoe UI", Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${fighter.hp}/${fighter.maxHp}`, x + width / 2, y + barH - 6);
+
+  // Name above
+  ctx.font = 'bold 14px "Segoe UI", Arial';
+  ctx.fillStyle = '#ddd';
+  ctx.fillText(fighter.name, x + width / 2, y - 8);
+
+  // Status icons
+  let statusX = x + width + 8;
+  if (fighter.shield > 0) {
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#4488ff';
+    ctx.fillText(`🛡️${fighter.shield}`, statusX, y + 16);
+    statusX += 45;
+  }
+  if (fighter.poison > 0) {
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#aa44ff';
+    ctx.fillText(`☠️${fighter.poison}`, statusX, y + 16);
+  }
+}
+
+function drawCards() {
+  if (gameState !== 'playerTurn') return;
+  const cardW = 100;
+  const cardH = 140;
+  const gap = 8;
+  const totalW = hand.length * (cardW + gap) - gap;
+  const startX = (canvas.width - totalW) / 2;
+  const baseY = canvas.height - cardH - 20;
+
+  for (let i = 0; i < hand.length; i++) {
+    const card = hand[i];
+    const x = startX + i * (cardW + gap);
+    const isHovered = i === hoveredCard;
+    const isSelected = i === selectedCard;
+    const canAfford = card.cost <= energy;
+    const y = isHovered ? baseY - 20 : isSelected ? baseY - 15 : baseY;
+
+    ctx.save();
+
+    // Card shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    roundRect(x + 3, y + 3, cardW, cardH, 8, true, false);
+
+    // Card background
+    const grad = ctx.createLinearGradient(x, y, x, y + cardH);
+    if (!canAfford) {
+      grad.addColorStop(0, '#2a2a3a');
+      grad.addColorStop(1, '#1a1a2a');
+    } else {
+      grad.addColorStop(0, '#2a2a4a');
+      grad.addColorStop(1, '#1a1a3a');
+    }
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = isSelected ? '#ffcc00' : isHovered && canAfford ? '#8888ff' : canAfford ? card.color + '88' : '#333';
+    ctx.lineWidth = isSelected ? 3 : 2;
+    roundRect(x, y, cardW, cardH, 8, true, true);
+
+    // Color accent bar
+    ctx.fillStyle = canAfford ? card.color : '#444';
+    roundRect(x + 4, y + 4, cardW - 8, 4, 2, true, false);
+
+    // Icon
+    ctx.font = '28px Arial';
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = canAfford ? 1 : 0.4;
+    ctx.fillText(card.icon, x + cardW / 2, y + 48);
+
+    // Name
+    ctx.font = 'bold 12px "Segoe UI", Arial';
+    ctx.fillStyle = canAfford ? '#fff' : '#666';
+    ctx.fillText(card.name, x + cardW / 2, y + 72);
+
+    // Description
+    ctx.font = '10px "Segoe UI", Arial';
+    ctx.fillStyle = canAfford ? '#aaa' : '#555';
+    ctx.fillText(card.desc, x + cardW / 2, y + 90);
+
+    // Damage/effect value
+    if (card.dmg !== 0) {
+      ctx.font = 'bold 16px "Segoe UI", Arial';
+      ctx.fillStyle = card.dmg > 0 ? '#ff6644' : '#44dd66';
+      ctx.fillText(card.dmg > 0 ? `-${card.dmg}` : `+${Math.abs(card.dmg)}`, x + cardW / 2, y + 115);
+    }
+
+    // Energy cost (top-right circle)
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(x + cardW - 14, y + 14, 13, 0, Math.PI * 2);
+    ctx.fillStyle = canAfford ? '#4466aa' : '#332233';
+    ctx.fill();
+    ctx.strokeStyle = canAfford ? '#6688cc' : '#443344';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.font = 'bold 14px "Segoe UI", Arial';
+    ctx.fillStyle = canAfford ? '#aaddff' : '#554455';
+    ctx.fillText(card.cost, x + cardW - 14, y + 19);
+
+    ctx.restore();
+  }
+}
+
+function drawEnergyBar() {
+  const x = 30;
+  const y = canvas.height - 55;
+  ctx.font = 'bold 14px "Segoe UI", Arial';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#aaddff';
+  ctx.fillText('ENERGY', x, y - 8);
+
+  for (let i = 0; i < ENERGY_MAX; i++) {
+    ctx.beginPath();
+    ctx.arc(x + 16 + i * 30, y + 12, 12, 0, Math.PI * 2);
+    ctx.fillStyle = i < energy ? '#4488ff' : '#222244';
+    ctx.fill();
+    ctx.strokeStyle = i < energy ? '#6699ff' : '#333355';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    if (i < energy) {
+      ctx.beginPath();
+      ctx.arc(x + 16 + i * 30, y + 10, 5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fill();
+    }
+  }
+}
+
+function drawEndTurnButton() {
+  if (gameState !== 'playerTurn') return;
+  const bx = canvas.width - 140;
+  const by = canvas.height - 65;
+  const bw = 110;
+  const bh = 40;
+
+  ctx.fillStyle = endTurnHovered ? '#5566aa' : '#3344778';
+  ctx.strokeStyle = endTurnHovered ? '#88aaff' : '#556688';
+  ctx.lineWidth = 2;
+  roundRect(bx, by, bw, bh, 8, true, true);
+
+  ctx.font = 'bold 14px "Segoe UI", Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = endTurnHovered ? '#fff' : '#aabbdd';
+  ctx.fillText('END TURN', bx + bw / 2, by + bh / 2 + 5);
+}
+
+function drawTurnIndicator() {
+  ctx.font = 'bold 16px "Segoe UI", Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#aaa';
+  ctx.fillText(`Turn ${turnNumber}`, canvas.width / 2, 25);
+
+  if (gameState === 'playerTurn') {
+    ctx.fillStyle = '#44dd66';
+    ctx.fillText('⚔️ YOUR TURN', canvas.width / 2, 50);
+  } else if (gameState === 'enemyTurn' || gameState === 'animating') {
+    ctx.fillStyle = '#ff6644';
+    ctx.fillText('🐸 ENEMY TURN', canvas.width / 2, 50);
+  }
+}
+
+function drawFloatingTexts(dt) {
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    const ft = floatingTexts[i];
+    ft.y += ft.vy * dt / 16;
+    ft.vy *= 0.98;
+    ft.life -= dt;
+    const alpha = Math.max(0, ft.life / ft.maxLife);
+    const scale = ft.scale * (0.8 + 0.2 * Math.min(1, (ft.maxLife - ft.life) / 200));
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `bold ${Math.round(18 * scale)}px "Segoe UI", Arial`;
+    ctx.textAlign = 'center';
+
+    // Outline
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText(ft.text, ft.x, ft.y);
+
+    ctx.fillStyle = ft.color;
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.restore();
+
+    if (ft.life <= 0) floatingTexts.splice(i, 1);
+  }
+}
+
+function drawWinLoseScreen() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const isWin = gameState === 'win';
+  ctx.textAlign = 'center';
+
+  // Title
+  ctx.font = 'bold 64px "Segoe UI", Arial';
+  ctx.fillStyle = isWin ? '#44dd66' : '#dd4444';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 6;
+  ctx.strokeText(isWin ? 'VICTORY!' : 'DEFEAT', canvas.width / 2, canvas.height / 2 - 40);
+  ctx.fillText(isWin ? 'VICTORY!' : 'DEFEAT', canvas.width / 2, canvas.height / 2 - 40);
+
+  // Subtitle
+  ctx.font = '24px "Segoe UI", Arial';
+  ctx.fillStyle = '#aaa';
+  ctx.fillText(isWin ? 'The enemy frog has been vanquished!' : 'Your frog has fallen...', canvas.width / 2, canvas.height / 2 + 10);
+
+  // Stats
+  ctx.font = '16px "Segoe UI", Arial';
+  ctx.fillStyle = '#888';
+  ctx.fillText(`Completed in ${turnNumber} turns`, canvas.width / 2, canvas.height / 2 + 50);
+
+  // Restart button
+  const bx = canvas.width / 2 - 80;
+  const by = canvas.height / 2 + 75;
+  ctx.fillStyle = restartHovered ? '#5566aa' : '#334477';
+  ctx.strokeStyle = '#556699';
+  ctx.lineWidth = 2;
+  roundRect(bx, by, 160, 45, 10, true, true);
+  ctx.font = 'bold 18px "Segoe UI", Arial';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('PLAY AGAIN', canvas.width / 2, by + 30);
+
+  // Spawn victory/defeat particles
+  if (Math.random() > 0.7) {
+    spawnParticles(
+      Math.random() * canvas.width, Math.random() * canvas.height / 2,
+      1, isWin ? '#44dd66' : '#dd4444', 'star', 2
+    );
+  }
+  ctx.restore();
+}
+
+let restartHovered = false;
+
+function roundRect(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fill) ctx.fill();
+  if (stroke) ctx.stroke();
+}
+
+function shadeColor(color, percent) {
+  const num = parseInt(color.replace('#', ''), 16);
+  const r = Math.min(255, Math.max(0, (num >> 16) + percent));
+  const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + percent));
+  const b = Math.min(255, Math.max(0, (num & 0xff) + percent));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ---- Input ----
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+  hoveredCard = -1;
+  endTurnHovered = false;
+  restartHovered = false;
+  canvas.style.cursor = 'default';
+
+  if (gameState === 'playerTurn') {
+    const cardW = 100, cardH = 140, gap = 8;
+    const totalW = hand.length * (cardW + gap) - gap;
+    const startX = (canvas.width - totalW) / 2;
+    const baseY = canvas.height - cardH - 20;
+
+    for (let i = 0; i < hand.length; i++) {
+      const x = startX + i * (cardW + gap);
+      if (mx >= x && mx <= x + cardW && my >= baseY - 20 && my <= baseY + cardH) {
+        hoveredCard = i;
+        if (hand[i].cost <= energy) canvas.style.cursor = 'pointer';
+        break;
+      }
+    }
+
+    // End turn button
+    const bx = canvas.width - 140, by = canvas.height - 65;
+    if (mx >= bx && mx <= bx + 110 && my >= by && my <= by + 40) {
+      endTurnHovered = true;
+      canvas.style.cursor = 'pointer';
+    }
+  }
+
+  if (gameState === 'win' || gameState === 'lose') {
+    const bx = canvas.width / 2 - 80, by = canvas.height / 2 + 75;
+    if (mx >= bx && mx <= bx + 160 && my >= by && my <= by + 45) {
+      restartHovered = true;
+      canvas.style.cursor = 'pointer';
+    }
+  }
+});
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+  if (gameState === 'playerTurn') {
+    if (hoveredCard >= 0 && hand[hoveredCard] && hand[hoveredCard].cost <= energy) {
+      playCard(hoveredCard);
+      return;
+    }
+    if (endTurnHovered) {
+      endTurn();
+      return;
+    }
+  }
+
+  if ((gameState === 'win' || gameState === 'lose') && restartHovered) {
+    init();
+  }
+});
+
+// ---- Game loop ----
+let lastTime = 0;
+
+function gameLoop(timestamp) {
+  const dt = Math.min(50, timestamp - (lastTime || timestamp));
+  lastTime = timestamp;
+
+  // Update sprites
+  for (const f of [player, enemy]) {
+    if (!f) continue;
+    f.frameTimer += dt;
+    if (f.frameTimer >= f.animSpeed) {
+      f.frameTimer = 0;
+      f.frame = (f.frame + 1) % 6;
+    }
+    if (f.flash > 0) f.flash = Math.max(0, f.flash - dt);
+    if (f.shakeX !== 0) f.shakeX *= 0.85;
+    if (Math.abs(f.shakeX) < 0.5) f.shakeX = 0;
+  }
+
+  // Update particles
+  particles = particles.filter(p => p.update(dt));
+
+  // Draw
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawBackground();
+
+  if (player && enemy) {
+    drawSprite(player, 'player');
+    drawSprite(enemy, 'enemy');
+    drawHPBar(player, 40, 75, 200);
+    drawHPBar(enemy, canvas.width - 240, 75, 200);
+    drawCards();
+    drawEnergyBar();
+    drawEndTurnButton();
+    drawTurnIndicator();
+  }
+
+  // Draw particles
+  for (const p of particles) p.draw();
+  drawFloatingTexts(dt);
+
+  if (gameState === 'win' || gameState === 'lose') {
+    drawWinLoseScreen();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+</script>
+</body>
+</html>

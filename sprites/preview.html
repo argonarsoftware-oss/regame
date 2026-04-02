@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Frog Sprite Variant Preview</title>
+<style>
+  body { margin:0; background:#0f1720; color:#e5eefc; font-family:Arial,sans-serif; }
+  .bar { display:flex; gap:12px; align-items:center; padding:12px 16px; background:#172130; position:sticky; top:0; }
+  select, button { background:#243247; color:#fff; border:1px solid #3a5070; border-radius:8px; padding:8px 12px; }
+  canvas { display:block; margin:20px auto; background:linear-gradient(#20375a, #0d1420 65%); border:1px solid #314763; border-radius:16px; box-shadow:0 15px 40px rgba(0,0,0,.35); }
+  .note { width:min(1100px,92vw); margin:0 auto 18px; color:#bcd0f0; }
+  code { background:#111925; padding:2px 6px; border-radius:6px; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <label>Variant:
+      <select id="variant">
+        <option value="ember">Ember</option>
+        <option value="toxic">Toxic</option>
+        <option value="frost">Frost</option>
+        <option value="void">Void</option>
+        <option value="royal">Royal</option>
+      </select>
+    </label>
+    <label>Sheet:
+      <select id="sheetKind">
+        <option value="6frame">6-frame</option>
+        <option value="4frame">4-frame</option>
+      </select>
+    </label>
+    <button id="toggleMirror">Toggle Enemy Mirror</button>
+  </div>
+  <canvas id="game" width="1100" height="560"></canvas>
+  <div class="note">
+    Preview for generated sprite variants. Files are in folders like <code>ember/ember_sheet_6frame.png</code> and sliced frames in <code>ember/frames_6frame/</code>.
+  </div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+
+const variantEl = document.getElementById("variant");
+const sheetEl = document.getElementById("sheetKind");
+const mirrorBtn = document.getElementById("toggleMirror");
+
+let mirrorEnemy = true;
+mirrorBtn.onclick = () => mirrorEnemy = !mirrorEnemy;
+
+const spriteMeta = {
+  "6frame": {
+    path: v => `./${v}/${v}_sheet_6frame.png`,
+    frames: 6,
+    bboxes: [
+      [19,30,96,87],[147,29,224,86],[276,29,353,86],
+      [405,30,482,87],[533,31,610,88],[659,31,736,88]
+    ],
+    scale: 4
+  },
+  "4frame": {
+    path: v => `./${v}/${v}_sheet_4frame.png`,
+    frames: 4,
+    bboxes: [
+      [77,53,168,160],[325,55,416,160],[572,56,664,160],[821,55,912,160]
+    ],
+    scale: 2.5
+  }
+};
+
+const images = {};
+function getImage(path) {
+  if (images[path]) return images[path];
+  const img = new Image();
+  img.src = path;
+  images[path] = img;
+  return img;
+}
+
+const fighter = {
+  t: 0,
+  speed: 7,
+  hitFlash: 0
+};
+const enemy = {
+  t: 0,
+  speed: 7,
+  hitFlash: 0
+};
+
+function drawGround() {
+  ctx.fillStyle = "#23324a";
+  ctx.fillRect(0, 410, canvas.width, 150);
+  ctx.fillStyle = "#1a2436";
+  for (let i = 0; i < canvas.width; i += 60) {
+    ctx.fillRect(i, 430 + (i % 120 === 0 ? 0 : 10), 36, 90);
+  }
+}
+
+function drawSprite(img, meta, t, x, y, mirror=false, hitFlash=0) {
+  const index = Math.floor(t * meta.speed) % meta.bboxes.length;
+  const [sx, sy, ex, ey] = meta.bboxes[index];
+  const sw = ex - sx, sh = ey - sy;
+  const dw = sw * meta.scale, dh = sh * meta.scale;
+
+  ctx.save();
+  ctx.translate(x, y);
+  if (mirror) ctx.scale(-1, 1);
+
+  if (hitFlash > 0) {
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(-dw/2 - 4, -dh + 6, dw + 8, dh + 8);
+    ctx.globalAlpha = 1;
+  }
+  ctx.drawImage(img, sx, sy, sw, sh, -dw/2, -dh, dw, dh);
+  ctx.restore();
+}
+
+function drawLabel(text, x, y) {
+  ctx.fillStyle = "rgba(15,23,32,.75)";
+  ctx.fillRect(x - 70, y - 24, 140, 28);
+  ctx.fillStyle = "#e5eefc";
+  ctx.font = "bold 16px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(text, x, y - 5);
+}
+
+let last = 0;
+function loop(ts) {
+  const dt = Math.min(0.033, (ts - last) / 1000 || 0);
+  last = ts;
+  fighter.t += dt;
+  enemy.t += dt;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGround();
+
+  const variant = variantEl.value;
+  const sheet = sheetEl.value;
+  const meta = structuredClone(spriteMeta[sheet]);
+  meta.speed = fighter.speed;
+  const img = getImage(meta.path(variant));
+
+  drawLabel("PLAYER", 250, 115);
+  drawLabel("ENEMY", 850, 115);
+  drawSprite(img, meta, fighter.t, 250, 380, false, fighter.hitFlash);
+  drawSprite(img, meta, enemy.t, 850, 380, mirrorEnemy, enemy.hitFlash);
+
+  ctx.fillStyle = "#9bb4d3";
+  ctx.font = "14px Arial";
+  ctx.textAlign = "left";
+  ctx.fillText(`Variant: ${variant}`, 18, 540);
+  ctx.fillText(`Sheet: ${sheet}`, 18, 520);
+  ctx.fillText(`Enemy mirrored: ${mirrorEnemy ? "yes" : "no"}`, 18, 500);
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

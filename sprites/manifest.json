@@ -1,0 +1,866 @@
+{
+  "original_6frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        19,
+        30,
+        96,
+        87
+      ],
+      "file": "frame_1.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        147,
+        29,
+        224,
+        86
+      ],
+      "file": "frame_2.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        276,
+        29,
+        353,
+        86
+      ],
+      "file": "frame_3.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        405,
+        30,
+        482,
+        87
+      ],
+      "file": "frame_4.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 5,
+      "bbox": [
+        533,
+        31,
+        610,
+        88
+      ],
+      "file": "frame_5.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 6,
+      "bbox": [
+        659,
+        31,
+        736,
+        88
+      ],
+      "file": "frame_6.png",
+      "size": [
+        77,
+        57
+      ]
+    }
+  ],
+  "original_4frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        77,
+        53,
+        168,
+        160
+      ],
+      "file": "frame_1.png",
+      "size": [
+        91,
+        107
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        325,
+        55,
+        416,
+        160
+      ],
+      "file": "frame_2.png",
+      "size": [
+        91,
+        105
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        572,
+        56,
+        664,
+        160
+      ],
+      "file": "frame_3.png",
+      "size": [
+        92,
+        104
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        821,
+        55,
+        912,
+        160
+      ],
+      "file": "frame_4.png",
+      "size": [
+        91,
+        105
+      ]
+    }
+  ],
+  "ember_6frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        19,
+        30,
+        96,
+        87
+      ],
+      "file": "ember_1.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        147,
+        29,
+        224,
+        86
+      ],
+      "file": "ember_2.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        276,
+        29,
+        353,
+        86
+      ],
+      "file": "ember_3.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        405,
+        30,
+        482,
+        87
+      ],
+      "file": "ember_4.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 5,
+      "bbox": [
+        533,
+        31,
+        610,
+        88
+      ],
+      "file": "ember_5.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 6,
+      "bbox": [
+        659,
+        31,
+        736,
+        88
+      ],
+      "file": "ember_6.png",
+      "size": [
+        77,
+        57
+      ]
+    }
+  ],
+  "ember_4frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        77,
+        53,
+        168,
+        160
+      ],
+      "file": "ember_1.png",
+      "size": [
+        91,
+        107
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        325,
+        55,
+        416,
+        160
+      ],
+      "file": "ember_2.png",
+      "size": [
+        91,
+        105
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        572,
+        56,
+        664,
+        160
+      ],
+      "file": "ember_3.png",
+      "size": [
+        92,
+        104
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        821,
+        55,
+        912,
+        160
+      ],
+      "file": "ember_4.png",
+      "size": [
+        91,
+        105
+      ]
+    }
+  ],
+  "toxic_6frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        19,
+        30,
+        96,
+        87
+      ],
+      "file": "toxic_1.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        147,
+        29,
+        224,
+        86
+      ],
+      "file": "toxic_2.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        276,
+        29,
+        353,
+        86
+      ],
+      "file": "toxic_3.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        405,
+        30,
+        482,
+        87
+      ],
+      "file": "toxic_4.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 5,
+      "bbox": [
+        533,
+        31,
+        610,
+        88
+      ],
+      "file": "toxic_5.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 6,
+      "bbox": [
+        659,
+        31,
+        736,
+        88
+      ],
+      "file": "toxic_6.png",
+      "size": [
+        77,
+        57
+      ]
+    }
+  ],
+  "toxic_4frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        77,
+        53,
+        168,
+        160
+      ],
+      "file": "toxic_1.png",
+      "size": [
+        91,
+        107
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        325,
+        55,
+        416,
+        160
+      ],
+      "file": "toxic_2.png",
+      "size": [
+        91,
+        105
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        572,
+        56,
+        664,
+        160
+      ],
+      "file": "toxic_3.png",
+      "size": [
+        92,
+        104
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        821,
+        55,
+        912,
+        160
+      ],
+      "file": "toxic_4.png",
+      "size": [
+        91,
+        105
+      ]
+    }
+  ],
+  "frost_6frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        19,
+        30,
+        96,
+        87
+      ],
+      "file": "frost_1.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        147,
+        29,
+        224,
+        86
+      ],
+      "file": "frost_2.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        276,
+        29,
+        353,
+        86
+      ],
+      "file": "frost_3.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        405,
+        30,
+        482,
+        87
+      ],
+      "file": "frost_4.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 5,
+      "bbox": [
+        533,
+        31,
+        610,
+        88
+      ],
+      "file": "frost_5.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 6,
+      "bbox": [
+        659,
+        31,
+        736,
+        88
+      ],
+      "file": "frost_6.png",
+      "size": [
+        77,
+        57
+      ]
+    }
+  ],
+  "frost_4frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        77,
+        53,
+        168,
+        160
+      ],
+      "file": "frost_1.png",
+      "size": [
+        91,
+        107
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        325,
+        55,
+        416,
+        160
+      ],
+      "file": "frost_2.png",
+      "size": [
+        91,
+        105
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        572,
+        56,
+        664,
+        160
+      ],
+      "file": "frost_3.png",
+      "size": [
+        92,
+        104
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        821,
+        55,
+        912,
+        160
+      ],
+      "file": "frost_4.png",
+      "size": [
+        91,
+        105
+      ]
+    }
+  ],
+  "void_6frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        19,
+        30,
+        96,
+        87
+      ],
+      "file": "void_1.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        147,
+        29,
+        224,
+        86
+      ],
+      "file": "void_2.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        276,
+        29,
+        353,
+        86
+      ],
+      "file": "void_3.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        405,
+        30,
+        482,
+        87
+      ],
+      "file": "void_4.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 5,
+      "bbox": [
+        533,
+        31,
+        610,
+        88
+      ],
+      "file": "void_5.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 6,
+      "bbox": [
+        659,
+        31,
+        736,
+        88
+      ],
+      "file": "void_6.png",
+      "size": [
+        77,
+        57
+      ]
+    }
+  ],
+  "void_4frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        77,
+        53,
+        168,
+        160
+      ],
+      "file": "void_1.png",
+      "size": [
+        91,
+        107
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        325,
+        55,
+        416,
+        160
+      ],
+      "file": "void_2.png",
+      "size": [
+        91,
+        105
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        572,
+        56,
+        664,
+        160
+      ],
+      "file": "void_3.png",
+      "size": [
+        92,
+        104
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        821,
+        55,
+        912,
+        160
+      ],
+      "file": "void_4.png",
+      "size": [
+        91,
+        105
+      ]
+    }
+  ],
+  "royal_6frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        19,
+        30,
+        96,
+        87
+      ],
+      "file": "royal_1.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        147,
+        29,
+        224,
+        86
+      ],
+      "file": "royal_2.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        276,
+        29,
+        353,
+        86
+      ],
+      "file": "royal_3.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        405,
+        30,
+        482,
+        87
+      ],
+      "file": "royal_4.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 5,
+      "bbox": [
+        533,
+        31,
+        610,
+        88
+      ],
+      "file": "royal_5.png",
+      "size": [
+        77,
+        57
+      ]
+    },
+    {
+      "frame": 6,
+      "bbox": [
+        659,
+        31,
+        736,
+        88
+      ],
+      "file": "royal_6.png",
+      "size": [
+        77,
+        57
+      ]
+    }
+  ],
+  "royal_4frame": [
+    {
+      "frame": 1,
+      "bbox": [
+        77,
+        53,
+        168,
+        160
+      ],
+      "file": "royal_1.png",
+      "size": [
+        91,
+        107
+      ]
+    },
+    {
+      "frame": 2,
+      "bbox": [
+        325,
+        55,
+        416,
+        160
+      ],
+      "file": "royal_2.png",
+      "size": [
+        91,
+        105
+      ]
+    },
+    {
+      "frame": 3,
+      "bbox": [
+        572,
+        56,
+        664,
+        160
+      ],
+      "file": "royal_3.png",
+      "size": [
+        92,
+        104
+      ]
+    },
+    {
+      "frame": 4,
+      "bbox": [
+        821,
+        55,
+        912,
+        160
+      ],
+      "file": "royal_4.png",
+      "size": [
+        91,
+        105
+      ]
+    }
+  ]
+}
