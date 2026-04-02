@@ -58,14 +58,33 @@ const imageSources = {
   frost:  'sprites/frost/frost_sheet_6frame.png',
   backgrounds: 'sprites/battle_backgrounds.png',
 };
-const BG_COLS = 2, BG_ROWS = 3, BG_W = 768, BG_H = Math.floor(1024 / 3);
 const BG_NAMES = ['Tropical', 'Volcano', 'Frozen', 'Cosmic', 'Inferno', 'Toxic Swamp'];
+const bgCanvases = []; // pre-split background canvases
 let currentBg = 0;
 let loadedCount = 0;
 const totalImages = Object.keys(imageSources).length;
 for (const [key, src] of Object.entries(imageSources)) {
   const img = new Image();
-  img.onload = () => { loadedCount++; if (loadedCount >= totalImages) init(); };
+  img.onload = () => {
+    loadedCount++;
+    // Pre-split backgrounds into individual canvases on load
+    if (key === 'backgrounds') {
+      const cols = 2, rows = 3;
+      const cellW = Math.floor(img.naturalWidth / cols);
+      const cellH = Math.floor(img.naturalHeight / rows);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const offscreen = document.createElement('canvas');
+          offscreen.width = cellW;
+          offscreen.height = cellH;
+          const octx = offscreen.getContext('2d');
+          octx.drawImage(img, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
+          bgCanvases.push(offscreen);
+        }
+      }
+    }
+    if (loadedCount >= totalImages) init();
+  };
   img.onerror = () => console.error('Failed to load', src);
   img.src = src;
   images[key] = img;
@@ -877,11 +896,9 @@ function finishEnemyTurn() {
 //  DRAWING
 // ============================================================
 function drawBackground() {
-  const bg = images.backgrounds;
-  if (bg && bg.complete) {
-    const col = currentBg % BG_COLS;
-    const row = Math.floor(currentBg / BG_COLS);
-    ctx.drawImage(bg, col * BG_W, row * BG_H, BG_W, BG_H, 0, 0, W, H);
+  const bgCanvas = bgCanvases[currentBg];
+  if (bgCanvas) {
+    ctx.drawImage(bgCanvas, 0, 0, bgCanvas.width, bgCanvas.height, 0, 0, W, H);
     const vig = ctx.createRadialGradient(480, 320, 200, 480, 320, 520);
     vig.addColorStop(0, 'rgba(0,0,0,0)');
     vig.addColorStop(1, 'rgba(0,0,0,0.45)');
