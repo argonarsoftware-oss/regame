@@ -7,41 +7,39 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  background: #0a0a1a;
+  background: #1a2a15;
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  font-family: 'Segoe UI', Arial, sans-serif;
+  font-family: 'Fredoka One', 'Baloo 2', 'Segoe UI', Arial, sans-serif;
   overflow: hidden;
 }
 canvas { display: block; cursor: default; image-rendering: pixelated; }
 #gameContainer {
   position: relative;
-  border: 3px solid #2a2a4a;
-  border-radius: 12px;
+  border: 4px solid #5a3a1a;
+  border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 0 60px rgba(100, 60, 255, 0.3);
+  box-shadow: 0 0 40px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.2);
 }
 </style>
 </head>
 <body>
 <div id="gameContainer">
-  <canvas id="gameCanvas" width="960" height="640"></canvas>
+  <canvas id="gameCanvas" width="1100" height="680"></canvas>
 </div>
 
 <script>
 // ============================================================
-//  FROG LEGENDS — Axie-style Turn-Based Battle (v2)
-//  Patterns from: Slay the Web, Ancient Beast, Pokemon Showdown,
-//  Creature Chess, PixiJS Open Games
+//  FROG LEGENDS — Axie Infinity-style 3v3 Turn-Based Battle
 // ============================================================
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
 
-// ---- Sprite sheet frame data (from manifest.json bbox) ----
-const FRAME_DATA_6 = [
+// ---- Sprite sheet frame data ----
+const FRAME_DATA = [
   { x: 19, y: 30, w: 77, h: 57 },
   { x: 147, y: 29, w: 77, h: 57 },
   { x: 276, y: 29, w: 77, h: 57 },
@@ -53,625 +51,22 @@ const FRAME_DATA_6 = [
 // ---- Asset loading ----
 const images = {};
 const imageSources = {
-  player: 'sprites/ember/ember_sheet_6frame.png',
-  enemy:  'sprites/toxic/toxic_sheet_6frame.png',
-  frost:  'sprites/frost/frost_sheet_6frame.png',
+  ember: 'sprites/ember/ember_sheet_6frame.png',
+  toxic: 'sprites/toxic/toxic_sheet_6frame.png',
+  frost: 'sprites/frost/frost_sheet_6frame.png',
 };
-const BG_NAMES = ['Tropical', 'Volcano', 'Frozen', 'Cosmic', 'Inferno', 'Toxic Swamp'];
-const bgCanvases = [];
-let currentBg = 0;
 let loadedCount = 0;
 const totalImages = Object.keys(imageSources).length;
 for (const [key, src] of Object.entries(imageSources)) {
   const img = new Image();
-  img.onload = () => { loadedCount++; if (loadedCount >= totalImages) { generateBackgrounds(); init(); } };
-  img.onerror = () => console.error('Failed to load', src);
+  img.onload = () => { loadedCount++; if (loadedCount >= totalImages) { generateBackground(); init(); } };
+  img.onerror = () => console.error('Failed:', src);
   img.src = src;
   images[key] = img;
 }
 
 // ============================================================
-//  PROCEDURAL BACKGROUND GENERATOR (inspired by original art)
-// ============================================================
-function generateBackgrounds() {
-  const bw = 960, bh = 640;
-  const configs = [
-    { // 0: Tropical — blue sky, green field, palm trees, mountains
-      sky: ['#4aa3df', '#87ceeb', '#c8e6c9'],
-      ground: ['#5d9e3a', '#7ec850', '#4a8c2a'],
-      mountains: ['#3a7a5a', '#2d6b4a'],
-      features: 'tropical',
-    },
-    { // 1: Volcano — red/orange sky, dark cracked ground, lava, erupting volcano
-      sky: ['#1a0a00', '#8b1a00', '#ff4400'],
-      ground: ['#1a1210', '#2a1a15', '#0d0a08'],
-      mountains: ['#2a1a10', '#1a0d08'],
-      features: 'volcano',
-    },
-    { // 2: Frozen — light blue sky, snow mountains, ice crystals
-      sky: ['#b8d4e8', '#e8f4f8', '#d0e8f0'],
-      ground: ['#c8dce8', '#e0eef5', '#a0c0d8'],
-      mountains: ['#e8f0f5', '#c8dce8'],
-      features: 'frozen',
-    },
-    { // 3: Cosmic — purple/magenta sky, floating islands, stars, nebula
-      sky: ['#0d0020', '#2a0845', '#4a1060'],
-      ground: ['#3a2020', '#4a2830', '#2a1515'],
-      mountains: ['#5a3040', '#3a1a25'],
-      features: 'cosmic',
-    },
-    { // 4: Inferno — dark purple, lava rivers, crystal formations
-      sky: ['#0a0015', '#1a0530', '#35104a'],
-      ground: ['#1a1008', '#0d0804', '#2a1810'],
-      mountains: ['#2a1530', '#1a0a20'],
-      features: 'inferno',
-    },
-    { // 5: Toxic Swamp — green glow, dead trees, acid pools
-      sky: ['#0a1a08', '#1a3010', '#2a4018'],
-      ground: ['#1a2a10', '#2a3a18', '#0d1a08'],
-      mountains: ['#3a4a20', '#2a3515'],
-      features: 'toxic',
-    },
-  ];
-
-  for (const cfg of configs) {
-    const c = document.createElement('canvas');
-    c.width = bw; c.height = bh;
-    const g = c.getContext('2d');
-    drawArenaBackground(g, bw, bh, cfg);
-    bgCanvases.push(c);
-  }
-}
-
-function drawArenaBackground(g, w, h, cfg) {
-  const groundY = h * 0.55;
-
-  // Sky gradient
-  const skyGrad = g.createLinearGradient(0, 0, 0, groundY);
-  cfg.sky.forEach((c, i) => skyGrad.addColorStop(i / (cfg.sky.length - 1), c));
-  g.fillStyle = skyGrad;
-  g.fillRect(0, 0, w, groundY + 30);
-
-  // Ground gradient
-  const gndGrad = g.createLinearGradient(0, groundY - 20, 0, h);
-  cfg.ground.forEach((c, i) => gndGrad.addColorStop(i / (cfg.ground.length - 1), c));
-  g.fillStyle = gndGrad;
-  g.fillRect(0, groundY - 20, w, h - groundY + 20);
-
-  // Feature-specific details
-  switch (cfg.features) {
-    case 'tropical': drawTropical(g, w, h, groundY); break;
-    case 'volcano':  drawVolcano(g, w, h, groundY); break;
-    case 'frozen':   drawFrozen(g, w, h, groundY); break;
-    case 'cosmic':   drawCosmic(g, w, h, groundY); break;
-    case 'inferno':  drawInferno(g, w, h, groundY); break;
-    case 'toxic':    drawToxicSwamp(g, w, h, groundY); break;
-  }
-
-  // Ground line (subtle)
-  g.strokeStyle = 'rgba(255,255,255,0.08)';
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(0, groundY);
-  for (let x = 0; x <= w; x += 20) {
-    g.lineTo(x, groundY + Math.sin(x * 0.02) * 5 + Math.sin(x * 0.05) * 3);
-  }
-  g.stroke();
-}
-
-function drawMountains(g, w, baseY, color1, color2, count, maxH, jagged) {
-  for (let i = 0; i < count; i++) {
-    const cx = (w / (count - 1)) * i + (Math.random() - 0.5) * 80;
-    const mw = 120 + Math.random() * 200;
-    const mh = maxH * (0.6 + Math.random() * 0.4);
-    const grad = g.createLinearGradient(cx, baseY - mh, cx, baseY);
-    grad.addColorStop(0, color1);
-    grad.addColorStop(1, color2);
-    g.fillStyle = grad;
-    g.beginPath();
-    g.moveTo(cx - mw / 2, baseY);
-    if (jagged) {
-      const steps = 6 + Math.floor(Math.random() * 4);
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        const x = cx - mw / 2 + mw * t;
-        const peakT = 1 - Math.abs(t - 0.5) * 2;
-        const y = baseY - mh * peakT + (Math.random() - 0.5) * mh * 0.15;
-        g.lineTo(x, y);
-      }
-    } else {
-      g.lineTo(cx - mw * 0.1, baseY - mh);
-      g.lineTo(cx + mw * 0.1, baseY - mh * 0.9);
-      g.lineTo(cx + mw / 2, baseY);
-    }
-    g.closePath();
-    g.fill();
-  }
-}
-
-function drawClouds(g, w, baseY, color, count) {
-  g.fillStyle = color;
-  for (let i = 0; i < count; i++) {
-    const cx = Math.random() * w;
-    const cy = 30 + Math.random() * baseY * 0.5;
-    const cw = 80 + Math.random() * 160;
-    const ch = 25 + Math.random() * 30;
-    g.globalAlpha = 0.2 + Math.random() * 0.3;
-    g.beginPath();
-    g.ellipse(cx, cy, cw, ch, 0, 0, Math.PI * 2);
-    g.fill();
-    g.beginPath();
-    g.ellipse(cx - cw * 0.3, cy + 5, cw * 0.6, ch * 0.7, 0, 0, Math.PI * 2);
-    g.fill();
-    g.beginPath();
-    g.ellipse(cx + cw * 0.3, cy + 3, cw * 0.5, ch * 0.8, 0, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.globalAlpha = 1;
-}
-
-function drawStars(g, w, h, count, colors) {
-  for (let i = 0; i < count; i++) {
-    const sx = Math.random() * w;
-    const sy = Math.random() * h * 0.5;
-    const sr = 0.5 + Math.random() * 2;
-    g.fillStyle = colors[Math.floor(Math.random() * colors.length)];
-    g.globalAlpha = 0.4 + Math.random() * 0.6;
-    g.beginPath();
-    g.arc(sx, sy, sr, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.globalAlpha = 1;
-}
-
-function drawRocks(g, groundY, w, count, colors) {
-  for (let i = 0; i < count; i++) {
-    const rx = Math.random() * w;
-    const ry = groundY + Math.random() * 80 - 10;
-    const rw = 15 + Math.random() * 40;
-    const rh = 10 + Math.random() * 25;
-    g.fillStyle = colors[Math.floor(Math.random() * colors.length)];
-    g.globalAlpha = 0.6 + Math.random() * 0.4;
-    g.beginPath();
-    g.moveTo(rx - rw / 2, ry);
-    g.lineTo(rx - rw * 0.3, ry - rh);
-    g.lineTo(rx + rw * 0.2, ry - rh * 0.8);
-    g.lineTo(rx + rw / 2, ry);
-    g.closePath();
-    g.fill();
-  }
-  g.globalAlpha = 1;
-}
-
-// ---------- TROPICAL ----------
-function drawTropical(g, w, h, groundY) {
-  drawMountains(g, w, groundY + 20, '#3a8a5a', '#2a6a3a', 5, 200, false);
-  drawMountains(g, w, groundY + 10, '#4a9a6a', '#3a7a4a', 4, 140, false);
-  drawClouds(g, w, groundY, 'rgba(255,255,255,0.9)', 6);
-
-  // Palm trees
-  for (const px of [80, 200, 750, 880]) {
-    const py = groundY - 5;
-    // Trunk
-    g.strokeStyle = '#6b4226';
-    g.lineWidth = 8;
-    g.beginPath();
-    g.moveTo(px, py);
-    g.quadraticCurveTo(px + 10, py - 80, px + 5, py - 140);
-    g.stroke();
-    // Fronds
-    for (let f = 0; f < 6; f++) {
-      const angle = (f / 6) * Math.PI * 2;
-      const fx = px + 5 + Math.cos(angle) * 60;
-      const fy = py - 140 + Math.sin(angle) * 30 + (Math.sin(angle) > 0 ? 15 : -5);
-      g.strokeStyle = '#2d8a2e';
-      g.lineWidth = 4;
-      g.beginPath();
-      g.moveTo(px + 5, py - 140);
-      g.quadraticCurveTo(px + 5 + Math.cos(angle) * 30, py - 145 + Math.sin(angle) * 10, fx, fy);
-      g.stroke();
-    }
-  }
-
-  // Grass tufts
-  g.strokeStyle = '#4a9a3a';
-  g.lineWidth = 2;
-  for (let i = 0; i < 40; i++) {
-    const gx = Math.random() * w;
-    const gy = groundY + Math.random() * 20;
-    for (let b = 0; b < 3; b++) {
-      g.beginPath();
-      g.moveTo(gx + b * 4 - 4, gy);
-      g.quadraticCurveTo(gx + b * 4 - 2 + (Math.random() - 0.5) * 10, gy - 12, gx + b * 4 + (Math.random() - 0.5) * 8, gy - 18 - Math.random() * 8);
-      g.stroke();
-    }
-  }
-
-  // Flowers
-  for (let i = 0; i < 15; i++) {
-    g.fillStyle = ['#ff4466', '#ffaa22', '#ff66aa', '#ffff44'][Math.floor(Math.random() * 4)];
-    const fx = Math.random() * w;
-    const fy = groundY + 5 + Math.random() * 30;
-    g.beginPath();
-    g.arc(fx, fy, 3 + Math.random() * 3, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  drawRocks(g, groundY, w, 8, ['#7a8a6a', '#6a7a5a', '#8a9a7a']);
-}
-
-// ---------- VOLCANO ----------
-function drawVolcano(g, w, h, groundY) {
-  // Volcano mountain (center-back)
-  const vcx = w * 0.5, vby = groundY + 20;
-  const grad = g.createLinearGradient(vcx, vby - 280, vcx, vby);
-  grad.addColorStop(0, '#3a1a08');
-  grad.addColorStop(0.7, '#2a1208');
-  grad.addColorStop(1, '#1a0d05');
-  g.fillStyle = grad;
-  g.beginPath();
-  g.moveTo(vcx - 250, vby);
-  g.lineTo(vcx - 60, vby - 280);
-  g.lineTo(vcx - 30, vby - 260);
-  g.lineTo(vcx + 30, vby - 265);
-  g.lineTo(vcx + 60, vby - 275);
-  g.lineTo(vcx + 250, vby);
-  g.closePath();
-  g.fill();
-
-  // Lava glow at crater
-  const lavaGrad = g.createRadialGradient(vcx, vby - 270, 5, vcx, vby - 250, 80);
-  lavaGrad.addColorStop(0, 'rgba(255,200,50,0.9)');
-  lavaGrad.addColorStop(0.3, 'rgba(255,100,0,0.6)');
-  lavaGrad.addColorStop(1, 'rgba(255,50,0,0)');
-  g.fillStyle = lavaGrad;
-  g.fillRect(vcx - 80, vby - 310, 160, 100);
-
-  // Lava eruption streaks
-  g.strokeStyle = '#ff6600';
-  g.lineWidth = 3;
-  for (let i = 0; i < 8; i++) {
-    g.globalAlpha = 0.5 + Math.random() * 0.5;
-    const ex = vcx + (Math.random() - 0.5) * 40;
-    g.beginPath();
-    g.moveTo(ex, vby - 270);
-    g.quadraticCurveTo(ex + (Math.random() - 0.5) * 100, vby - 330 - Math.random() * 60, ex + (Math.random() - 0.5) * 60, vby - 350 - Math.random() * 50);
-    g.stroke();
-  }
-  g.globalAlpha = 1;
-
-  // Side mountains
-  drawMountains(g, w, groundY + 15, '#2a1510', '#1a0d08', 6, 160, true);
-
-  // Lava cracks on ground
-  g.strokeStyle = '#ff4400';
-  g.lineWidth = 3;
-  g.shadowColor = '#ff6600';
-  g.shadowBlur = 10;
-  for (let i = 0; i < 12; i++) {
-    g.globalAlpha = 0.4 + Math.random() * 0.4;
-    const lx = Math.random() * w;
-    const ly = groundY + 10 + Math.random() * (h - groundY - 30);
-    g.beginPath();
-    g.moveTo(lx, ly);
-    let cx = lx, cy = ly;
-    for (let s = 0; s < 3 + Math.floor(Math.random() * 4); s++) {
-      cx += (Math.random() - 0.5) * 60;
-      cy += Math.random() * 20;
-      g.lineTo(cx, cy);
-    }
-    g.stroke();
-  }
-  g.shadowBlur = 0;
-  g.globalAlpha = 1;
-
-  // Embers in sky
-  for (let i = 0; i < 30; i++) {
-    g.fillStyle = Math.random() > 0.5 ? '#ff6600' : '#ffaa00';
-    g.globalAlpha = 0.3 + Math.random() * 0.5;
-    g.beginPath();
-    g.arc(Math.random() * w, Math.random() * groundY, 1 + Math.random() * 2, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.globalAlpha = 1;
-
-  // Smoke clouds
-  drawClouds(g, w, groundY * 0.3, 'rgba(60,30,10,0.8)', 4);
-
-  drawRocks(g, groundY, w, 10, ['#2a1a10', '#3a2215', '#1a1008']);
-}
-
-// ---------- FROZEN ----------
-function drawFrozen(g, w, h, groundY) {
-  // Snow mountains
-  drawMountains(g, w, groundY + 10, '#e8f0f5', '#c0d4e0', 5, 220, true);
-  drawMountains(g, w, groundY + 5, '#d0e4ee', '#b0c8d8', 4, 160, true);
-
-  // Snow caps (white highlights on peaks)
-  g.fillStyle = 'rgba(255,255,255,0.4)';
-  for (let i = 0; i < 20; i++) {
-    g.beginPath();
-    g.arc(Math.random() * w, groundY - 50 - Math.random() * 150, 15 + Math.random() * 30, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  drawClouds(g, w, groundY * 0.4, 'rgba(230,240,248,0.8)', 5);
-
-  // Ice crystals
-  g.strokeStyle = '#a0d8f0';
-  g.lineWidth = 2;
-  for (let i = 0; i < 8; i++) {
-    const ix = 50 + Math.random() * (w - 100);
-    const iy = groundY - 10 + Math.random() * 30;
-    const ih = 20 + Math.random() * 40;
-    g.globalAlpha = 0.4 + Math.random() * 0.4;
-    // Crystal shape
-    g.fillStyle = 'rgba(160,216,240,0.3)';
-    g.beginPath();
-    g.moveTo(ix, iy);
-    g.lineTo(ix - 8, iy - ih * 0.4);
-    g.lineTo(ix - 4, iy - ih);
-    g.lineTo(ix + 4, iy - ih * 0.9);
-    g.lineTo(ix + 8, iy - ih * 0.3);
-    g.closePath();
-    g.fill();
-    g.stroke();
-  }
-  g.globalAlpha = 1;
-
-  // Snow on ground
-  g.fillStyle = 'rgba(230,240,250,0.3)';
-  for (let i = 0; i < 30; i++) {
-    g.beginPath();
-    g.ellipse(Math.random() * w, groundY + Math.random() * 80, 20 + Math.random() * 50, 5 + Math.random() * 8, 0, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  // Snowflakes
-  g.fillStyle = '#fff';
-  for (let i = 0; i < 40; i++) {
-    g.globalAlpha = 0.3 + Math.random() * 0.5;
-    g.beginPath();
-    g.arc(Math.random() * w, Math.random() * h * 0.8, 1 + Math.random() * 2, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.globalAlpha = 1;
-
-  drawRocks(g, groundY, w, 6, ['#b0c4d0', '#c0d4e0', '#90a8b8']);
-}
-
-// ---------- COSMIC ----------
-function drawCosmic(g, w, h, groundY) {
-  // Nebula glow
-  const nebGrad = g.createRadialGradient(w * 0.3, h * 0.25, 50, w * 0.5, h * 0.3, 300);
-  nebGrad.addColorStop(0, 'rgba(120,40,180,0.4)');
-  nebGrad.addColorStop(0.5, 'rgba(80,20,140,0.2)');
-  nebGrad.addColorStop(1, 'rgba(40,10,80,0)');
-  g.fillStyle = nebGrad;
-  g.fillRect(0, 0, w, h);
-
-  const neb2 = g.createRadialGradient(w * 0.7, h * 0.15, 30, w * 0.7, h * 0.2, 200);
-  neb2.addColorStop(0, 'rgba(200,60,100,0.3)');
-  neb2.addColorStop(1, 'rgba(100,20,60,0)');
-  g.fillStyle = neb2;
-  g.fillRect(0, 0, w, h);
-
-  drawStars(g, w, h, 100, ['#fff', '#aaccff', '#ffaacc', '#ccaaff']);
-
-  // Floating islands
-  for (const [fx, fy, fw] of [[150, 180, 100], [700, 140, 80], [450, 100, 60], [850, 200, 70]]) {
-    const iGrad = g.createLinearGradient(fx, fy, fx, fy + 40);
-    iGrad.addColorStop(0, '#5a3040');
-    iGrad.addColorStop(1, '#3a1a25');
-    g.fillStyle = iGrad;
-    g.beginPath();
-    g.ellipse(fx, fy + 10, fw, 15, 0, 0, Math.PI * 2);
-    g.fill();
-    // Top terrain
-    g.fillStyle = '#4a2535';
-    g.beginPath();
-    g.moveTo(fx - fw, fy + 5);
-    for (let t = 0; t <= 1; t += 0.1) {
-      g.lineTo(fx - fw + fw * 2 * t, fy - 5 - Math.sin(t * Math.PI) * 15 + (Math.random() - 0.5) * 5);
-    }
-    g.lineTo(fx + fw, fy + 5);
-    g.closePath();
-    g.fill();
-    // Glow underneath
-    g.globalAlpha = 0.3;
-    g.fillStyle = '#aa44ff';
-    g.beginPath();
-    g.ellipse(fx, fy + 20, fw * 0.7, 8, 0, 0, Math.PI * 2);
-    g.fill();
-    g.globalAlpha = 1;
-  }
-
-  // Dark rocky ground
-  drawMountains(g, w, groundY + 20, '#4a2535', '#2a1520', 5, 100, true);
-  drawRocks(g, groundY, w, 12, ['#5a3040', '#4a2535', '#3a1a25']);
-
-  // Purple lava cracks
-  g.strokeStyle = '#aa44ff';
-  g.lineWidth = 2;
-  g.shadowColor = '#cc66ff';
-  g.shadowBlur = 8;
-  for (let i = 0; i < 6; i++) {
-    g.globalAlpha = 0.4 + Math.random() * 0.3;
-    const lx = Math.random() * w;
-    const ly = groundY + 20 + Math.random() * 60;
-    g.beginPath();
-    g.moveTo(lx, ly);
-    for (let s = 0; s < 3; s++) g.lineTo(lx + (Math.random() - 0.5) * 80, ly + Math.random() * 30);
-    g.stroke();
-  }
-  g.shadowBlur = 0;
-  g.globalAlpha = 1;
-}
-
-// ---------- INFERNO ----------
-function drawInferno(g, w, h, groundY) {
-  // Deep lava glow from below
-  const lavaGlow = g.createLinearGradient(0, groundY, 0, h);
-  lavaGlow.addColorStop(0, 'rgba(255,80,0,0.1)');
-  lavaGlow.addColorStop(1, 'rgba(255,40,0,0.3)');
-  g.fillStyle = lavaGlow;
-  g.fillRect(0, groundY, w, h - groundY);
-
-  drawMountains(g, w, groundY + 15, '#2a1530', '#1a0a20', 6, 180, true);
-  drawStars(g, w, h, 30, ['#ffaa44', '#ff6644', '#ffcc88']);
-
-  // Crystal formations
-  for (let i = 0; i < 8; i++) {
-    const cx = 40 + Math.random() * (w - 80);
-    const cy = groundY - 5;
-    const ch = 30 + Math.random() * 60;
-    const cw = 6 + Math.random() * 10;
-    const grad = g.createLinearGradient(cx, cy, cx, cy - ch);
-    grad.addColorStop(0, '#4a2060');
-    grad.addColorStop(0.5, '#7a40a0');
-    grad.addColorStop(1, '#aa60d0');
-    g.fillStyle = grad;
-    g.globalAlpha = 0.6 + Math.random() * 0.4;
-    g.beginPath();
-    g.moveTo(cx - cw, cy);
-    g.lineTo(cx - cw * 0.3, cy - ch);
-    g.lineTo(cx + cw * 0.3, cy - ch * 0.85);
-    g.lineTo(cx + cw, cy);
-    g.closePath();
-    g.fill();
-    // Crystal glow
-    g.shadowColor = '#aa66ff';
-    g.shadowBlur = 12;
-    g.fill();
-    g.shadowBlur = 0;
-  }
-  g.globalAlpha = 1;
-
-  // Lava rivers
-  g.strokeStyle = '#ff4400';
-  g.lineWidth = 8;
-  g.shadowColor = '#ff6600';
-  g.shadowBlur = 15;
-  for (let i = 0; i < 4; i++) {
-    g.globalAlpha = 0.5 + Math.random() * 0.3;
-    const lx = Math.random() * w;
-    const ly = groundY + 30 + Math.random() * 60;
-    g.beginPath();
-    g.moveTo(lx, ly);
-    g.bezierCurveTo(lx + 80, ly - 10, lx + 160, ly + 20, lx + 200 + Math.random() * 100, ly + Math.random() * 30);
-    g.stroke();
-    // Inner glow
-    g.strokeStyle = '#ffaa00';
-    g.lineWidth = 3;
-    g.stroke();
-    g.strokeStyle = '#ff4400';
-    g.lineWidth = 8;
-  }
-  g.shadowBlur = 0;
-  g.globalAlpha = 1;
-
-  // Embers
-  for (let i = 0; i < 25; i++) {
-    g.fillStyle = ['#ff6600', '#ffaa00', '#ff4400'][Math.floor(Math.random() * 3)];
-    g.globalAlpha = 0.3 + Math.random() * 0.5;
-    g.beginPath();
-    g.arc(Math.random() * w, Math.random() * h, 1 + Math.random() * 2, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.globalAlpha = 1;
-
-  drawRocks(g, groundY, w, 8, ['#2a1530', '#1a0a20', '#3a2040']);
-}
-
-// ---------- TOXIC SWAMP ----------
-function drawToxicSwamp(g, w, h, groundY) {
-  // Green atmospheric glow
-  const glow = g.createRadialGradient(w * 0.5, groundY, 100, w * 0.5, groundY, 400);
-  glow.addColorStop(0, 'rgba(80,200,40,0.15)');
-  glow.addColorStop(1, 'rgba(40,100,20,0)');
-  g.fillStyle = glow;
-  g.fillRect(0, 0, w, h);
-
-  drawMountains(g, w, groundY + 15, '#3a4a20', '#2a3515', 4, 120, true);
-  drawClouds(g, w, groundY * 0.4, 'rgba(80,120,40,0.5)', 4);
-
-  // Dead trees
-  for (const tx of [100, 300, 650, 860]) {
-    const ty = groundY - 5;
-    g.strokeStyle = '#3a3020';
-    g.lineWidth = 6;
-    g.beginPath();
-    g.moveTo(tx, ty);
-    g.lineTo(tx + 3, ty - 80);
-    g.stroke();
-    // Branches
-    g.lineWidth = 3;
-    g.beginPath(); g.moveTo(tx + 3, ty - 60); g.lineTo(tx + 30, ty - 85); g.stroke();
-    g.beginPath(); g.moveTo(tx + 2, ty - 50); g.lineTo(tx - 25, ty - 75); g.stroke();
-    g.beginPath(); g.moveTo(tx + 3, ty - 35); g.lineTo(tx + 20, ty - 50); g.stroke();
-  }
-
-  // Acid pools
-  g.shadowColor = '#44ff00';
-  g.shadowBlur = 15;
-  for (let i = 0; i < 6; i++) {
-    const ax = 80 + Math.random() * (w - 160);
-    const ay = groundY + 20 + Math.random() * 80;
-    const aw = 30 + Math.random() * 70;
-    const ah = 8 + Math.random() * 15;
-    const poolGrad = g.createRadialGradient(ax, ay, 0, ax, ay, aw);
-    poolGrad.addColorStop(0, 'rgba(120,255,40,0.6)');
-    poolGrad.addColorStop(0.6, 'rgba(80,200,20,0.4)');
-    poolGrad.addColorStop(1, 'rgba(40,120,10,0.1)');
-    g.fillStyle = poolGrad;
-    g.beginPath();
-    g.ellipse(ax, ay, aw, ah, 0, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.shadowBlur = 0;
-
-  // Toxic bubbles
-  for (let i = 0; i < 20; i++) {
-    g.strokeStyle = 'rgba(120,255,40,0.4)';
-    g.lineWidth = 1;
-    const bx = Math.random() * w;
-    const by = groundY + 10 + Math.random() * 100;
-    const br = 2 + Math.random() * 5;
-    g.beginPath();
-    g.arc(bx, by, br, 0, Math.PI * 2);
-    g.stroke();
-  }
-
-  // Mushrooms
-  for (let i = 0; i < 10; i++) {
-    const mx = Math.random() * w;
-    const my = groundY + Math.random() * 40;
-    const ms = 5 + Math.random() * 10;
-    g.fillStyle = ['#aa44ff', '#44dd66', '#ff44aa'][Math.floor(Math.random() * 3)];
-    g.globalAlpha = 0.5 + Math.random() * 0.3;
-    // Cap
-    g.beginPath();
-    g.ellipse(mx, my - ms, ms, ms * 0.6, 0, 0, Math.PI * 2);
-    g.fill();
-    // Stem
-    g.fillStyle = '#8a8a6a';
-    g.fillRect(mx - 2, my - ms * 0.3, 4, ms * 0.8);
-  }
-  g.globalAlpha = 1;
-
-  // Fog at bottom
-  g.fillStyle = 'rgba(60,100,30,0.15)';
-  for (let i = 0; i < 8; i++) {
-    g.beginPath();
-    g.ellipse(Math.random() * w, h - 20 - Math.random() * 60, 100 + Math.random() * 150, 20 + Math.random() * 20, 0, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  drawRocks(g, groundY, w, 8, ['#3a4a20', '#4a5a28', '#2a3515']);
-}
-
-// ============================================================
-//  TWEEN ENGINE (from PixiJS Open Games patterns)
+//  TWEEN ENGINE
 // ============================================================
 function easeOutQuad(t) { return t * (2 - t); }
 function easeOutBack(t) { const s = 1.70158; return 1 + (--t) * t * ((s + 1) * t + s); }
@@ -679,15 +74,12 @@ function easeOutElastic(t) {
   return t === 0 || t === 1 ? t : Math.pow(2, -10 * t) * Math.sin((t - 0.1) * 5 * Math.PI) + 1;
 }
 function easeInQuad(t) { return t * t; }
-function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
 const tweens = [];
 function tweenTo(target, props, duration, ease = easeOutQuad, onComplete) {
   const tw = { target, props: {}, duration, elapsed: 0, ease, onComplete, done: false };
-  for (const [k, v] of Object.entries(props)) {
-    tw.props[k] = { from: target[k], to: v };
-  }
+  for (const [k, v] of Object.entries(props)) tw.props[k] = { from: target[k], to: v };
   tweens.push(tw);
   return tw;
 }
@@ -696,402 +88,351 @@ function updateTweens(dt) {
     const tw = tweens[i];
     tw.elapsed = Math.min(tw.elapsed + dt, tw.duration);
     const t = tw.ease(tw.elapsed / tw.duration);
-    for (const [k, { from, to }] of Object.entries(tw.props)) {
-      tw.target[k] = from + (to - from) * t;
-    }
-    if (tw.elapsed >= tw.duration) {
-      tw.done = true;
-      tweens.splice(i, 1);
-      tw.onComplete?.();
-    }
+    for (const [k, { from, to }] of Object.entries(tw.props)) tw.target[k] = from + (to - from) * t;
+    if (tw.elapsed >= tw.duration) { tweens.splice(i, 1); tw.onComplete?.(); }
   }
 }
 function killTweensOf(target) {
-  for (let i = tweens.length - 1; i >= 0; i--) {
-    if (tweens[i].target === target) tweens.splice(i, 1);
-  }
+  for (let i = tweens.length - 1; i >= 0; i--) if (tweens[i].target === target) tweens.splice(i, 1);
 }
 
 // ============================================================
-//  SCREEN SHAKE (from PixiJS Games earthquake pattern)
+//  SCREEN SHAKE
 // ============================================================
 const camera = { offsetX: 0, offsetY: 0, shakePower: 0, shakeDuration: 0, shakeElapsed: 0 };
 function screenShake(power = 8, duration = 400) {
-  camera.shakePower = power;
-  camera.shakeDuration = duration;
-  camera.shakeElapsed = 0;
+  camera.shakePower = power; camera.shakeDuration = duration; camera.shakeElapsed = 0;
 }
 function updateShake(dt) {
   if (camera.shakeElapsed < camera.shakeDuration) {
     camera.shakeElapsed += dt;
-    const t = camera.shakeElapsed / camera.shakeDuration;
-    const p = camera.shakePower * (1 - t);
+    const p = camera.shakePower * (1 - camera.shakeElapsed / camera.shakeDuration);
     camera.offsetX = (Math.random() * 2 - 1) * p;
     camera.offsetY = (Math.random() * 2 - 1) * p;
-  } else {
-    camera.offsetX = 0;
-    camera.offsetY = 0;
-  }
+  } else { camera.offsetX = 0; camera.offsetY = 0; }
 }
 
 // ============================================================
-//  PARTICLE SYSTEM with Object Pooling (from PixiJS patterns)
+//  PARTICLES
 // ============================================================
-const particlePool = [];
-const activeParticles = [];
-
-function getParticle() {
-  return particlePool.pop() || { x: 0, y: 0, vx: 0, vy: 0, color: '#fff', life: 0, maxLife: 0, size: 0, type: 'circle', alpha: 1, rotation: 0 };
-}
-function releaseParticle(p) { particlePool.push(p); }
-
+const particlePool = [], activeParticles = [];
+function getP() { return particlePool.pop() || {}; }
 function spawnParticles(x, y, count, color, type = 'circle', spread = 5) {
   for (let i = 0; i < count; i++) {
-    const p = getParticle();
-    p.x = x + (Math.random() - 0.5) * 30;
-    p.y = y + (Math.random() - 0.5) * 30;
-    p.vx = (Math.random() - 0.5) * spread;
-    p.vy = (Math.random() - 1) * spread;
-    p.color = color;
-    p.life = 500 + Math.random() * 500;
+    const p = getP();
+    Object.assign(p, {
+      x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 30,
+      vx: (Math.random() - 0.5) * spread, vy: (Math.random() - 1) * spread,
+      color, type, size: 3 + Math.random() * 5, alpha: 1,
+      life: 400 + Math.random() * 400, maxLife: 0, rotation: Math.random() * 6.28
+    });
     p.maxLife = p.life;
-    p.size = 3 + Math.random() * 5;
-    p.type = type;
-    p.alpha = 1;
-    p.rotation = Math.random() * Math.PI * 2;
     activeParticles.push(p);
   }
 }
-
 function updateParticles(dt) {
   for (let i = activeParticles.length - 1; i >= 0; i--) {
     const p = activeParticles[i];
-    p.x += p.vx * dt / 16;
-    p.y += p.vy * dt / 16;
-    p.vy += 0.1 * dt / 16;
-    p.life -= dt;
-    p.alpha = Math.max(0, p.life / p.maxLife);
-    if (p.life <= 0) {
-      activeParticles.splice(i, 1);
-      releaseParticle(p);
-    }
+    p.x += p.vx * dt / 16; p.y += p.vy * dt / 16; p.vy += 0.12 * dt / 16;
+    p.life -= dt; p.alpha = Math.max(0, p.life / p.maxLife);
+    if (p.life <= 0) { activeParticles.splice(i, 1); particlePool.push(p); }
   }
 }
-
 function drawParticles() {
   for (const p of activeParticles) {
-    ctx.save();
-    ctx.globalAlpha = p.alpha;
-    ctx.fillStyle = p.color;
-    if (p.type === 'circle') {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * p.alpha, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (p.type === 'star') {
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rotation + p.life * 0.01);
-      drawStar(0, 0, p.size * p.alpha, p.size * 0.4 * p.alpha, 5);
-      ctx.fill();
+    ctx.save(); ctx.globalAlpha = p.alpha; ctx.fillStyle = p.color;
+    if (p.type === 'circle') { ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.alpha, 0, 6.28); ctx.fill(); }
+    else if (p.type === 'star') {
+      ctx.translate(p.x, p.y); ctx.rotate(p.rotation + p.life * 0.01);
+      drawStar(0, 0, p.size * p.alpha, p.size * 0.4 * p.alpha, 5); ctx.fill();
     } else if (p.type === 'spark') {
-      ctx.strokeStyle = p.color;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x - p.vx * 3, p.y - p.vy * 3);
-      ctx.stroke();
+      ctx.strokeStyle = p.color; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 3, p.y - p.vy * 3); ctx.stroke();
     }
     ctx.restore();
   }
 }
-
-function drawStar(cx, cy, outerR, innerR, points) {
+function drawStar(cx, cy, or, ir, pts) {
   ctx.beginPath();
-  for (let i = 0; i < points * 2; i++) {
-    const r = i % 2 === 0 ? outerR : innerR;
-    const a = (i * Math.PI) / points - Math.PI / 2;
-    if (i === 0) ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
-    else ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+  for (let i = 0; i < pts * 2; i++) {
+    const r = i % 2 === 0 ? or : ir, a = (i * Math.PI) / pts - Math.PI / 2;
+    i === 0 ? ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)) : ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
   }
   ctx.closePath();
 }
 
 // ============================================================
-//  FLOATING TEXT SYSTEM with pooling (from PixiJS PointToaster)
+//  FLOATING TEXTS
 // ============================================================
 const floatingTexts = [];
-
-function spawnDamageText(x, y, text, color, scale = 1.5) {
-  floatingTexts.push({
-    x: x + (Math.random() - 0.5) * 40, y, text, color,
-    vy: -2.5, life: 1200, maxLife: 1200, scale,
-    phase: 'rise', elapsed: 0
-  });
+function spawnText(x, y, text, color, scale = 1.5) {
+  floatingTexts.push({ x: x + (Math.random() - 0.5) * 30, y, text, color, vy: -2.8, life: 1200, maxLife: 1200, scale });
 }
-
-function updateFloatingTexts(dt) {
+function updateTexts(dt) {
   for (let i = floatingTexts.length - 1; i >= 0; i--) {
-    const ft = floatingTexts[i];
-    ft.y += ft.vy * dt / 16;
-    ft.vy *= 0.98;
-    ft.life -= dt;
-    if (ft.life <= 0) floatingTexts.splice(i, 1);
+    const f = floatingTexts[i]; f.y += f.vy * dt / 16; f.vy *= 0.98; f.life -= dt;
+    if (f.life <= 0) floatingTexts.splice(i, 1);
   }
 }
-
-function drawFloatingTexts() {
-  for (const ft of floatingTexts) {
-    const alpha = Math.max(0, ft.life / ft.maxLife);
-    const popScale = ft.scale * (0.8 + 0.2 * Math.min(1, (ft.maxLife - ft.life) / 200));
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.font = `bold ${Math.round(18 * popScale)}px "Segoe UI", Arial`;
-    ctx.textAlign = 'center';
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 4;
-    ctx.strokeText(ft.text, ft.x, ft.y);
-    ctx.fillStyle = ft.color;
-    ctx.fillText(ft.text, ft.x, ft.y);
+function drawTexts() {
+  for (const f of floatingTexts) {
+    const a = Math.max(0, f.life / f.maxLife);
+    const s = f.scale * (0.8 + 0.2 * Math.min(1, (f.maxLife - f.life) / 150));
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.font = `bold ${Math.round(20 * s)}px "Segoe UI", Arial`;
+    ctx.textAlign = 'center'; ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+    ctx.strokeText(f.text, f.x, f.y); ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y);
     ctx.restore();
   }
 }
 
 // ============================================================
-//  POWER / BUFF-DEBUFF SYSTEM (from Slay the Web + Ancient Beast)
-//  Composable effects with stack decay
+//  PROCEDURAL BACKGROUND
 // ============================================================
-// Powers are stacks on a fighter. Each turn, stacks decrease by 1.
-// Effects modify the damage pipeline.
-const POWER_DEFS = {
-  strength:   { name: 'STR',   color: '#ff6644', icon: '💪', desc: '+N flat damage' },
-  weak:       { name: 'WEAK',  color: '#8866aa', icon: '😩', desc: 'Deal 75% damage' },
-  vulnerable: { name: 'VULN',  color: '#ff4488', icon: '💔', desc: 'Take 150% damage' },
-  poison:     { name: 'PSN',   color: '#aa44ff', icon: '☠️',  desc: 'N dmg/turn, -1/turn' },
-  toxic:      { name: 'TOX',   color: '#66ff44', icon: '🧪', desc: 'Escalating poison' },
-  burn:       { name: 'BURN',  color: '#ff8822', icon: '🔥', desc: 'N dmg/turn + ATK-25%' },
-  regen:      { name: 'REGEN', color: '#44dd66', icon: '💚', desc: 'Heal N/turn' },
-  thorns:     { name: 'THRN',  color: '#886644', icon: '🌿', desc: 'Reflect N dmg on hit' },
-};
+let bgCanvas = null;
+function generateBackground() {
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = W; bgCanvas.height = H;
+  const g = bgCanvas.getContext('2d');
 
-// ============================================================
-//  DAMAGE PIPELINE (from Slay the Web + Pokemon Showdown)
-//  base → strength → weak → crit → type effectiveness → vulnerable → block → HP
-// ============================================================
-const TYPE_CHART = {
-  fire:   { fire: 0.5, water: 0.5, grass: 2.0, neutral: 1.0 },
-  water:  { fire: 2.0, water: 0.5, grass: 0.5, neutral: 1.0 },
-  grass:  { fire: 0.5, water: 2.0, grass: 0.5, neutral: 1.0 },
-  neutral:{ fire: 1.0, water: 1.0, grass: 1.0, neutral: 1.0 },
-};
+  // Lush green forest arena (like Axie)
+  // Sky
+  const sky = g.createLinearGradient(0, 0, 0, H * 0.5);
+  sky.addColorStop(0, '#5ec8e5'); sky.addColorStop(1, '#a8e6a0');
+  g.fillStyle = sky; g.fillRect(0, 0, W, H * 0.55);
 
-function calcDamage(baseDmg, attacker, defender, cardElement = 'neutral') {
-  let dmg = baseDmg;
+  // Ground
+  const gnd = g.createLinearGradient(0, H * 0.5, 0, H);
+  gnd.addColorStop(0, '#5daa35'); gnd.addColorStop(0.3, '#4a9428');
+  gnd.addColorStop(1, '#3a7a1e');
+  g.fillStyle = gnd; g.fillRect(0, H * 0.48, W, H * 0.52);
 
-  // Strength buff: +N flat damage (from Slay the Web)
-  dmg += (attacker.powers.strength || 0);
-
-  // Weak debuff on attacker: deal 75% (from Slay the Web)
-  if (attacker.powers.weak > 0) dmg = Math.floor(dmg * 0.75);
-
-  // Burn debuff on attacker: deal 75% (from Pokemon Showdown)
-  if (attacker.powers.burn > 0) dmg = Math.floor(dmg * 0.75);
-
-  // Critical hit (from Pokemon Showdown tier system)
-  let isCrit = false;
-  const critRoll = Math.random();
-  if (critRoll < 0.04) { // ~4% base crit chance
-    isCrit = true;
-    dmg = Math.floor(dmg * 1.5);
+  // Background trees/forest
+  g.fillStyle = '#3a8825';
+  for (let i = 0; i < 8; i++) {
+    const tx = i * 150 + (Math.random() - 0.5) * 60;
+    const ty = H * 0.42;
+    g.beginPath();
+    g.ellipse(tx, ty, 50 + Math.random() * 40, 60 + Math.random() * 50, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.fillStyle = '#4a9a30';
+  for (let i = 0; i < 10; i++) {
+    const tx = i * 120 + (Math.random() - 0.5) * 50;
+    const ty = H * 0.46;
+    g.beginPath();
+    g.ellipse(tx, ty, 40 + Math.random() * 35, 40 + Math.random() * 40, 0, 0, Math.PI * 2);
+    g.fill();
   }
 
-  // Type effectiveness (from Pokemon Showdown)
-  const atkType = cardElement;
-  const defType = defender.element || 'neutral';
-  const effectiveness = (TYPE_CHART[atkType] && TYPE_CHART[atkType][defType]) || 1.0;
-  dmg = Math.floor(dmg * effectiveness);
+  // Big trees on edges (like Axie's forest frame)
+  drawBigTree(g, 30, H * 0.15, 0.9);
+  drawBigTree(g, W - 30, H * 0.15, -0.9);
 
-  // Random roll 85-100% (from Pokemon Showdown)
-  const roll = 0.85 + Math.random() * 0.15;
-  dmg = Math.floor(dmg * roll);
+  // Floating rocks/platforms in background
+  g.fillStyle = '#6aaa44';
+  for (const [fx, fy, fw] of [[200, 100, 80], [750, 80, 100], [500, 60, 60], [900, 120, 70]]) {
+    g.beginPath(); g.ellipse(fx, fy + 20, fw, 15, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#5a9a38';
+    g.beginPath();
+    g.moveTo(fx - fw, fy + 15);
+    for (let t = 0; t <= 1; t += 0.1)
+      g.lineTo(fx - fw + fw * 2 * t, fy + 5 - Math.sin(t * Math.PI) * 15);
+    g.lineTo(fx + fw, fy + 15); g.closePath(); g.fill();
+    g.fillStyle = '#6aaa44';
+  }
 
-  // Vulnerable on defender: take 150% (from Slay the Web)
-  if (defender.powers.vulnerable > 0) dmg = Math.floor(dmg * 1.5);
+  // Clouds
+  g.fillStyle = 'rgba(255,255,255,0.7)';
+  for (let i = 0; i < 5; i++) {
+    const cx = 100 + Math.random() * (W - 200), cy = 30 + Math.random() * 80;
+    const cw = 60 + Math.random() * 100;
+    g.beginPath(); g.ellipse(cx, cy, cw, 18, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(cx - cw * 0.3, cy + 5, cw * 0.6, 14, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(cx + cw * 0.3, cy + 3, cw * 0.5, 15, 0, 0, Math.PI * 2); g.fill();
+  }
 
-  // Minimum 1 damage (from Ancient Beast)
-  dmg = Math.max(1, dmg);
-
-  return { dmg, isCrit, effectiveness };
-}
-
-function applyDamage(target, rawDmg, color = '#ff4444', isCrit = false, effectiveness = 1.0) {
-  let dmg = rawDmg;
-
-  // Block absorb (from Slay the Web)
-  if (target.block > 0) {
-    const blocked = Math.min(target.block, dmg);
-    target.block -= blocked;
-    dmg -= blocked;
-    if (blocked > 0) {
-      spawnDamageText(target.x, target.y - 100, `${blocked} BLOCKED`, '#4488ff');
-      spawnParticles(target.x, target.y, 6, '#4488ff', 'star');
+  // Ground texture - grass tufts
+  g.strokeStyle = '#68b840';
+  g.lineWidth = 2;
+  for (let i = 0; i < 80; i++) {
+    const gx = Math.random() * W, gy = H * 0.5 + Math.random() * (H * 0.45);
+    for (let b = 0; b < 3; b++) {
+      g.beginPath();
+      g.moveTo(gx + b * 3 - 3, gy);
+      g.quadraticCurveTo(gx + (Math.random() - 0.5) * 8, gy - 10, gx + (Math.random() - 0.5) * 6, gy - 14 - Math.random() * 6);
+      g.stroke();
     }
   }
 
-  // Thorns reflect (from Slay the Web)
-  // (handled externally after attack resolves)
+  // Light rays
+  g.globalAlpha = 0.06;
+  g.fillStyle = '#fff';
+  for (let i = 0; i < 5; i++) {
+    const rx = 200 + i * 180;
+    g.beginPath();
+    g.moveTo(rx, 0); g.lineTo(rx - 60, H * 0.6); g.lineTo(rx + 60, H * 0.6);
+    g.closePath(); g.fill();
+  }
+  g.globalAlpha = 1;
 
+  // Mushrooms
+  for (let i = 0; i < 6; i++) {
+    const mx = Math.random() * W, my = H * 0.52 + Math.random() * (H * 0.3);
+    g.fillStyle = '#cc4444';
+    g.beginPath(); g.ellipse(mx, my - 6, 6, 4, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#ddd'; g.fillRect(mx - 2, my - 3, 4, 8);
+  }
+}
+
+function drawBigTree(g, x, y, dir) {
+  // Trunk
+  g.fillStyle = '#5a3a1a';
+  g.beginPath();
+  g.moveTo(x - 30 * dir, H);
+  g.quadraticCurveTo(x - 20 * dir, y + 100, x + 10 * dir, y + 50);
+  g.quadraticCurveTo(x + 20 * dir, y + 100, x + 40 * dir, H);
+  g.closePath();
+  g.fill();
+  // Canopy
+  g.fillStyle = '#2d7a22';
+  g.beginPath(); g.ellipse(x + 5 * dir, y + 30, 80, 70, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#3a8a2a';
+  g.beginPath(); g.ellipse(x - 20 * dir, y + 10, 60, 55, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#4a9a35';
+  g.beginPath(); g.ellipse(x + 25 * dir, y, 50, 45, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#55aa40';
+  g.beginPath(); g.ellipse(x, y - 15, 40, 35, 0, 0, Math.PI * 2); g.fill();
+  // Vine
+  g.strokeStyle = '#3a8825';
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(x + 30 * dir, y + 50);
+  g.quadraticCurveTo(x + 50 * dir, y + 100, x + 35 * dir, y + 160);
+  g.stroke();
+}
+
+// ============================================================
+//  POWER / STATUS SYSTEM
+// ============================================================
+const POWER_DEFS = {
+  strength:   { name: 'STR',  color: '#ff6644', icon: '💪' },
+  weak:       { name: 'WEAK', color: '#8866aa', icon: '😩' },
+  vulnerable: { name: 'VULN', color: '#ff4488', icon: '💔' },
+  poison:     { name: 'PSN',  color: '#aa44ff', icon: '☠️' },
+  regen:      { name: 'RGN',  color: '#44dd66', icon: '💚' },
+};
+
+// ============================================================
+//  DAMAGE PIPELINE
+// ============================================================
+function calcDamage(baseDmg, attacker, defender) {
+  let dmg = baseDmg + (attacker.powers.strength || 0);
+  if (attacker.powers.weak > 0) dmg = Math.floor(dmg * 0.75);
+  // Crit: 8% chance, 1.5x
+  let isCrit = Math.random() < 0.08;
+  if (isCrit) dmg = Math.floor(dmg * 1.5);
+  // Random roll 85-100%
+  dmg = Math.floor(dmg * (0.85 + Math.random() * 0.15));
+  if (defender.powers.vulnerable > 0) dmg = Math.floor(dmg * 1.5);
+  return { dmg: Math.max(1, dmg), isCrit };
+}
+
+function applyDamage(target, rawDmg, color = '#ff4444', isCrit = false) {
+  let dmg = rawDmg;
+  if (target.block > 0) {
+    const blocked = Math.min(target.block, dmg);
+    target.block -= blocked; dmg -= blocked;
+    if (blocked > 0) { spawnText(target.x, target.y - 50, `${blocked} BLOCKED`, '#4488ff'); spawnParticles(target.x, target.y, 5, '#4488ff', 'star'); }
+  }
   if (dmg > 0) {
     target.hp = Math.max(0, target.hp - dmg);
-    target.flash = 250;
-    target.flashColor = color;
-
-    // Squash/stretch on hit (from PixiJS patterns)
-    killTweensOf(target);
-    target.scaleX = 1.3;
-    target.scaleY = 0.7;
-    tweenTo(target, { scaleX: 1, scaleY: 1 }, 600, easeOutElastic);
-
-    // Screen shake proportional to damage (from PixiJS patterns)
-    screenShake(Math.min(3 + dmg * 0.3, 15), 300);
+    target.flash = 250; target.flashColor = color;
+    killTweensOf(target); target.scaleX = 1.3; target.scaleY = 0.7;
+    tweenTo(target, { scaleX: 1, scaleY: 1 }, 500, easeOutElastic);
+    screenShake(Math.min(3 + dmg * 0.25, 14), 250);
   }
-
-  // Effect text
-  let label = `-${rawDmg}`;
-  if (isCrit) label = `CRIT! -${rawDmg}`;
-  if (effectiveness > 1) label += ' (SE!)';
-  else if (effectiveness < 1) label += ' (NVE)';
-
-  const textColor = isCrit ? '#ffff00' : effectiveness > 1 ? '#ff4444' : effectiveness < 1 ? '#8888aa' : color;
-  spawnDamageText(target.x, target.y - 70, label, textColor, isCrit ? 2.0 : 1.5);
-
-  if (isCrit) {
-    spawnParticles(target.x, target.y, 25, '#ffff00', 'star', 10);
-    screenShake(15, 400);
-  }
-
+  let label = `${rawDmg}`;
+  if (isCrit) label = `${rawDmg}!`;
+  spawnText(target.x, target.y - 40, label, isCrit ? '#ffff00' : color, isCrit ? 2.2 : 1.8);
+  if (isCrit) spawnParticles(target.x, target.y, 20, '#ffff00', 'star', 8);
   return dmg;
 }
 
 // ============================================================
-//  CARD DEFINITIONS (from Slay the Web schema)
-//  Each card: name, type, cost, baseDmg, element, powers, exhaust, desc
+//  CARDS — Axie-style with creature portraits
 // ============================================================
 const CARD_DEFS = [
-  // --- Attacks ---
-  { name: 'Slash',      type: 'attack', cost: 1, baseDmg: 9,  element: 'neutral', powers: {},                  exhaust: false, color: '#ff6644', icon: '⚔️',  desc: 'Deal 9 damage' },
-  { name: 'Fireball',   type: 'attack', cost: 2, baseDmg: 16, element: 'fire',    powers: {},                  exhaust: false, color: '#ff4422', icon: '🔥', desc: '16 fire damage' },
-  { name: 'Aqua Jet',   type: 'attack', cost: 2, baseDmg: 14, element: 'water',   powers: { weak: 1 },        exhaust: false, color: '#4488ff', icon: '💧', desc: '14 water dmg, apply 1 Weak' },
-  { name: 'Vine Whip',  type: 'attack', cost: 1, baseDmg: 7,  element: 'grass',   powers: {},                  exhaust: false, color: '#44bb44', icon: '🌿', desc: '7 grass dmg, draw 1' , actions: ['draw1'] },
-  { name: 'Bite',       type: 'attack', cost: 1, baseDmg: 6,  element: 'neutral', powers: {},                  exhaust: false, color: '#ffaa22', icon: '🦷', desc: '6 damage x2 hits', multi: 2 },
-  { name: 'Heavy Slam', type: 'attack', cost: 2, baseDmg: 22, element: 'neutral', powers: { vulnerable: 1 },  exhaust: false, color: '#cc6644', icon: '💥', desc: '22 dmg, apply 1 Vuln' },
-  { name: 'Inferno',    type: 'attack', cost: 3, baseDmg: 28, element: 'fire',    powers: { burn: 2 },        exhaust: false, color: '#ff2200', icon: '🌋', desc: '28 fire dmg + 2 Burn' },
-  { name: 'Soul Drain', type: 'attack', cost: 3, baseDmg: 20, element: 'neutral', powers: {},                  exhaust: false, color: '#ff44aa', icon: '🩸', desc: '20 dmg, heal 50%',  actions: ['drainHeal'] },
-
-  // --- Skills ---
-  { name: 'Heal',       type: 'skill',  cost: 1, heal: 12, powers: {},                  exhaust: false, color: '#44dd66', icon: '💚', desc: 'Heal 12 HP' },
-  { name: 'Shield Up',  type: 'skill',  cost: 1, block: 8, powers: {},                  exhaust: false, color: '#4488ff', icon: '🛡️',  desc: 'Gain 8 Block' },
-  { name: 'Toxic Spit', type: 'skill',  cost: 2, powers: { poison: 6 }, target: 'enemy', exhaust: false, color: '#aa44ff', icon: '☠️',  desc: 'Apply 6 Poison' },
-  { name: 'Fortify',    type: 'skill',  cost: 1, block: 14,powers: {},                  exhaust: false, color: '#6688cc', icon: '🏰', desc: 'Gain 14 Block' },
-
-  // --- Powers (persistent buffs) ---
-  { name: 'Rage',       type: 'power',  cost: 1, powers: { strength: 2 }, selfPowers: true, exhaust: false, color: '#ff8800', icon: '💢', desc: 'Gain 2 Strength' },
-  { name: 'Regen',      type: 'power',  cost: 1, powers: { regen: 3 },   selfPowers: true, exhaust: false, color: '#44ff88', icon: '🌱', desc: 'Gain 3 Regen' },
-  { name: 'Thorns',     type: 'power',  cost: 1, powers: { thorns: 3 },  selfPowers: true, exhaust: false, color: '#886644', icon: '🌵', desc: 'Gain 3 Thorns' },
-
-  // --- Exhaust (one-time powerful, from Slay the Web) ---
-  { name: 'Adrenaline', type: 'skill',  cost: 0, powers: {}, exhaust: true, color: '#ffcc00', icon: '⚡', desc: 'Draw 2, gain 1 energy', actions: ['draw2', 'energy1'] },
-  { name: 'Execute',    type: 'attack', cost: 2, baseDmg: 40, element: 'neutral', powers: {}, exhaust: true, color: '#dd0000', icon: '🗡️',  desc: '40 damage. Exhaust.', conditions: ['targetBelow50'] },
+  { name: 'Slash',      cost: 1, baseDmg: 10, type: 'attack', powers: {},                color: '#e85d3a', icon: '⚔️',  desc: 'Deal 10 damage', sprite: 'ember' },
+  { name: 'Fireball',   cost: 2, baseDmg: 18, type: 'attack', powers: {},                color: '#e83a2a', icon: '🔥', desc: 'Deal 18 fire dmg', sprite: 'ember' },
+  { name: 'Bite',       cost: 1, baseDmg: 7,  type: 'attack', powers: {},                color: '#e8a03a', icon: '🦷', desc: '7 dmg x2 hits', sprite: 'ember', multi: 2 },
+  { name: 'Heavy Slam', cost: 2, baseDmg: 22, type: 'attack', powers: { vulnerable: 1 }, color: '#cc5533', icon: '💥', desc: '22 dmg + 1 Vuln', sprite: 'ember' },
+  { name: 'Venom Spit', cost: 2, baseDmg: 8,  type: 'attack', powers: { poison: 4 },     color: '#aa44ff', icon: '☠️',  desc: '8 dmg + 4 Poison', sprite: 'toxic' },
+  { name: 'Heal',       cost: 1, heal: 15,    type: 'skill',  powers: {},                color: '#44bb55', icon: '💚', desc: 'Heal 15 HP', sprite: 'frost' },
+  { name: 'Shield',     cost: 1, block: 10,   type: 'skill',  powers: {},                color: '#4488cc', icon: '🛡️',  desc: 'Gain 10 Block', sprite: 'frost' },
+  { name: 'Rage',       cost: 1, type: 'power', powers: { strength: 2 }, selfPowers: true, color: '#e86830', icon: '💢', desc: 'Gain 2 Strength', sprite: 'ember' },
+  { name: 'Regen',      cost: 1, type: 'power', powers: { regen: 3 }, selfPowers: true,   color: '#44cc66', icon: '🌱', desc: 'Gain 3 Regen', sprite: 'frost' },
+  { name: 'Acid Bath',  cost: 2, baseDmg: 12, type: 'attack', powers: { weak: 2 },       color: '#88cc22', icon: '🧪', desc: '12 dmg + 2 Weak', sprite: 'toxic' },
+  { name: 'Soul Drain', cost: 3, baseDmg: 20, type: 'attack', powers: {},                color: '#cc44aa', icon: '🩸', desc: '20 dmg, heal 50%', sprite: 'ember', drain: true },
 ];
 
 // ============================================================
-//  FIGHTER / CREATURE (from Ancient Beast baseStats pattern)
+//  FIGHTER (creature)
 // ============================================================
-function createFighter(name, hp, element, isPlayer, imgKey) {
+function createFrog(name, hp, imgKey, isPlayer, slot) {
+  // Positions: 3 frogs on each side, staggered like Axie
+  const px = isPlayer
+    ? [160, 230, 300][slot]
+    : [W - 160, W - 230, W - 300][slot];
+  const py = isPlayer
+    ? [340, 290, 380][slot]
+    : [340, 290, 380][slot];
   return {
-    name, element, imgKey,
-    hp, maxHp: hp, block: 0,
-    powers: {}, // { strength: 2, poison: 3, etc. }
-    toxicStage: 0, // escalating toxic counter (from Pokemon Showdown)
-    isPlayer,
-    x: isPlayer ? 180 : 720, y: 330,
-    baseX: isPlayer ? 180 : 720, baseY: 330,
-    scale: 3.2, scaleX: 1, scaleY: 1,
-    frame: 0, frameTimer: 0, animSpeed: 120,
+    name, hp, maxHp: hp, block: 0, powers: {}, alive: true,
+    imgKey, isPlayer, slot,
+    x: px, y: py, baseX: px, baseY: py,
+    scale: slot === 0 ? 2.8 : slot === 1 ? 2.4 : 2.0,
+    scaleX: 1, scaleY: 1,
+    frame: 0, frameTimer: 0, animSpeed: 100 + slot * 20,
     flash: 0, flashColor: '#fff',
   };
 }
 
 // ============================================================
-//  DECK SYSTEM (from Slay the Web 5-pile system)
+//  DECK SYSTEM
 // ============================================================
-let drawPile = [], hand = [], discardPile = [], exhaustPile = [];
-
+let drawPile = [], hand = [], discardPile = [];
 function buildDeck() {
   const deck = [];
-  // Build deck: 2 copies of each card
-  for (const def of CARD_DEFS) {
-    for (let i = 0; i < 2; i++) {
-      deck.push({ ...def, id: Math.random().toString(36).substr(2, 9) });
-    }
-  }
-  shuffleArray(deck);
-  drawPile = deck;
-  hand = [];
-  discardPile = [];
-  exhaustPile = [];
+  for (const def of CARD_DEFS) for (let i = 0; i < 2; i++) deck.push({ ...def, id: Math.random().toString(36).substr(2, 9) });
+  shuffle(deck); drawPile = deck; hand = []; discardPile = [];
 }
-
-function shuffleArray(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-
-function drawCards(count) {
-  for (let i = 0; i < count; i++) {
-    if (drawPile.length === 0) {
-      drawPile = [...discardPile];
-      discardPile = [];
-      shuffleArray(drawPile);
-    }
-    if (drawPile.length > 0 && hand.length < 10) {
-      hand.push(drawPile.pop());
-    }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } }
+function drawCards(n) {
+  for (let i = 0; i < n; i++) {
+    if (drawPile.length === 0) { drawPile = [...discardPile]; discardPile = []; shuffle(drawPile); }
+    if (drawPile.length > 0 && hand.length < 6) hand.push(drawPile.pop());
   }
 }
 
 // ============================================================
-//  ENEMY INTENT SYSTEM (from Slay the Web monster pattern)
-//  Show what the enemy will do next turn
+//  ENEMY INTENT SYSTEM
 // ============================================================
 const ENEMY_INTENTS = [
-  { name: 'Claw',       type: 'attack', dmg: 11, icon: '⚔️', color: '#ff6644' },
-  { name: 'Venom Spit', type: 'poison', dmg: 8,  poisonAmt: 5, icon: '☠️', color: '#aa44ff' },
-  { name: 'Toxic Heal', type: 'heal',   heal: 15, icon: '💚', color: '#44dd66' },
-  { name: 'Shell',      type: 'block',  block: 12, icon: '🛡️', color: '#4488ff' },
-  { name: 'Heavy Slam', type: 'attack', dmg: 18, icon: '💥', color: '#ff4422', vuln: 1 },
-  { name: 'Acid Spray',  type: 'debuff', weak: 2, icon: '😩', color: '#8866aa' },
-  { name: 'Leech Bite', type: 'drain',  dmg: 12, healAmt: 6, icon: '🩸', color: '#ff44aa' },
+  { name: 'Claw',       type: 'attack', dmg: 10, color: '#e85d3a' },
+  { name: 'Venom Spit', type: 'poison', dmg: 6, poisonAmt: 4, color: '#aa44ff' },
+  { name: 'Heal',       type: 'heal',   heal: 12, color: '#44bb55' },
+  { name: 'Shield',     type: 'block',  block: 10, color: '#4488cc' },
+  { name: 'Heavy Slam', type: 'attack', dmg: 16, color: '#cc5533', vuln: 1 },
+  { name: 'Acid Spray', type: 'debuff', weak: 2, color: '#88cc22' },
 ];
-let currentIntent = null;
-let nextIntent = null;
 
-function rollIntent() {
-  const hpPct = enemy.hp / enemy.maxHp;
-  let weights;
-  if (hpPct < 0.3) {
-    weights = [1, 1, 4, 2, 0, 1, 2]; // favor healing
-  } else if (hpPct < 0.6) {
-    weights = [2, 2, 1, 2, 2, 1, 1]; // balanced
-  } else {
-    weights = [3, 2, 0, 1, 2, 2, 1]; // aggressive
-  }
-  const total = weights.reduce((a, b) => a + b, 0);
+function rollIntent(frog) {
+  const hp = frog.hp / frog.maxHp;
+  const w = hp < 0.3 ? [1, 0, 4, 2, 0, 0] : hp < 0.6 ? [2, 1, 1, 2, 2, 1] : [3, 2, 0, 1, 2, 2];
+  const total = w.reduce((a, b) => a + b);
   let r = Math.random() * total;
-  for (let i = 0; i < weights.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return { ...ENEMY_INTENTS[i] };
-  }
+  for (let i = 0; i < w.length; i++) { r -= w[i]; if (r <= 0) return { ...ENEMY_INTENTS[i] }; }
   return { ...ENEMY_INTENTS[0] };
 }
 
@@ -1101,201 +442,141 @@ function rollIntent() {
 const ENERGY_MAX = 3;
 let gameState = 'loading';
 let turnNumber = 0;
-let player, enemy, energy;
-let selectedCard = -1, hoveredCard = -1;
-let endTurnHovered = false, restartHovered = false;
-let actionQueue = []; // sequential action queue
+let playerTeam = [], enemyTeam = [];
+let energy = ENERGY_MAX;
+let hoveredCard = -1, selectedTarget = -1, endTurnHovered = false, restartHovered = false;
+let activeCard = null; // card being played (shown at top)
+let activeCardTimer = 0;
+let enemyIntents = []; // one per enemy frog
 
 function init() {
-  player = createFighter('Ember Frog', 80, 'fire', true, 'player');
-  enemy = createFighter('Toxic Frog', 72, 'grass', false, 'enemy');
+  playerTeam = [
+    createFrog('Ember', 55, 'ember', true, 0),
+    createFrog('Frost', 50, 'frost', true, 1),
+    createFrog('Toxic', 48, 'toxic', true, 2),
+  ];
+  enemyTeam = [
+    createFrog('Venom', 48, 'toxic', false, 0),
+    createFrog('Blaze', 44, 'ember', false, 1),
+    createFrog('Ice',   42, 'frost', false, 2),
+  ];
   energy = ENERGY_MAX;
-  selectedCard = -1;
   turnNumber = 0;
-  currentBg = Math.floor(Math.random() * 6);
   floatingTexts.length = 0;
   activeParticles.length = 0;
   tweens.length = 0;
-  actionQueue = [];
+  activeCard = null;
   buildDeck();
-  nextIntent = rollIntent();
+  enemyIntents = enemyTeam.map(f => rollIntent(f));
   startPlayerTurn();
   gameState = 'playerTurn';
   lastTime = 0;
   requestAnimationFrame(gameLoop);
 }
 
-// ============================================================
-//  TURN LIFECYCLE (from Slay the Web + Pokemon Showdown)
-// ============================================================
+function allFrogs() { return [...playerTeam, ...enemyTeam]; }
+function alivePlayerFrogs() { return playerTeam.filter(f => f.alive); }
+function aliveEnemyFrogs() { return enemyTeam.filter(f => f.alive); }
+
 function startPlayerTurn() {
   turnNumber++;
   energy = ENERGY_MAX;
-  player.block = 0; // block resets each turn (from Slay the Web)
-  drawCards(5);
-
-  // Process player start-of-turn effects
-  processStartOfTurn(player);
+  playerTeam.forEach(f => { if (f.alive) { f.block = 0; processStartOfTurn(f); } });
+  drawCards(4);
 }
 
-function processStartOfTurn(fighter) {
-  // Poison: flat DoT, decreases by 1 each turn (from Slay the Web)
-  if (fighter.powers.poison > 0) {
-    const poisonDmg = fighter.powers.poison;
-    fighter.hp = Math.max(0, fighter.hp - poisonDmg);
-    fighter.flash = 200; fighter.flashColor = '#aa44ff';
-    spawnDamageText(fighter.x, fighter.y - 70, `${poisonDmg} POISON`, '#cc66ff');
-    spawnParticles(fighter.x, fighter.y, 10, '#aa44ff', 'circle');
-    fighter.powers.poison--;
-    if (fighter.powers.poison <= 0) delete fighter.powers.poison;
-    screenShake(4, 200);
+function processStartOfTurn(f) {
+  if (f.powers.poison > 0) {
+    f.hp = Math.max(0, f.hp - f.powers.poison);
+    f.flash = 200; f.flashColor = '#aa44ff';
+    spawnText(f.x, f.y - 50, `${f.powers.poison} PSN`, '#cc66ff');
+    spawnParticles(f.x, f.y, 8, '#aa44ff', 'circle');
+    f.powers.poison--;
+    if (f.powers.poison <= 0) delete f.powers.poison;
+    if (f.hp <= 0) killFrog(f);
   }
-
-  // Toxic: escalating DoT (from Pokemon Showdown)
-  if (fighter.powers.toxic > 0) {
-    fighter.toxicStage = Math.min(15, (fighter.toxicStage || 0) + 1);
-    const toxDmg = Math.max(1, Math.floor(fighter.maxHp / 16) * fighter.toxicStage);
-    fighter.hp = Math.max(0, fighter.hp - toxDmg);
-    fighter.flash = 200; fighter.flashColor = '#66ff44';
-    spawnDamageText(fighter.x, fighter.y - 70, `${toxDmg} TOXIC`, '#66ff44');
-    spawnParticles(fighter.x, fighter.y, 12, '#66ff44', 'circle');
-    screenShake(5, 200);
-  }
-
-  // Burn: DoT + already handled in damage calc (from Pokemon Showdown)
-  if (fighter.powers.burn > 0) {
-    const burnDmg = Math.max(1, Math.floor(fighter.maxHp / 16));
-    fighter.hp = Math.max(0, fighter.hp - burnDmg);
-    fighter.flash = 200; fighter.flashColor = '#ff8822';
-    spawnDamageText(fighter.x, fighter.y - 90, `${burnDmg} BURN`, '#ff8822');
-    spawnParticles(fighter.x, fighter.y, 8, '#ff8822', 'circle');
-    fighter.powers.burn--;
-    if (fighter.powers.burn <= 0) delete fighter.powers.burn;
-  }
-
-  // Regen: heal per turn (from Slay the Web)
-  if (fighter.powers.regen > 0) {
-    const healAmt = fighter.powers.regen;
-    fighter.hp = Math.min(fighter.maxHp, fighter.hp + healAmt);
-    spawnDamageText(fighter.x, fighter.y - 70, `+${healAmt} REGEN`, '#44dd66');
-    spawnParticles(fighter.x, fighter.y, 6, '#44ff66', 'circle', 3);
-    fighter.powers.regen--;
-    if (fighter.powers.regen <= 0) delete fighter.powers.regen;
-  }
-
-  // Check death
-  if (fighter.hp <= 0) {
-    setTimeout(() => { gameState = fighter.isPlayer ? 'lose' : 'win'; }, 600);
+  if (f.powers.regen > 0) {
+    const h = f.powers.regen;
+    f.hp = Math.min(f.maxHp, f.hp + h);
+    spawnText(f.x, f.y - 50, `+${h}`, '#44dd66');
+    spawnParticles(f.x, f.y, 5, '#44ff66', 'circle', 3);
+    f.powers.regen--;
+    if (f.powers.regen <= 0) delete f.powers.regen;
   }
 }
 
-function decayPowers(fighter) {
-  // Decay non-persistent powers by 1 each turn (from Slay the Web)
-  for (const key of ['weak', 'vulnerable']) {
-    if (fighter.powers[key] > 0) {
-      fighter.powers[key]--;
-      if (fighter.powers[key] <= 0) delete fighter.powers[key];
-    }
+function killFrog(f) {
+  f.alive = false;
+  f.hp = 0;
+  spawnParticles(f.x, f.y, 30, '#ff4444', 'star', 10);
+  screenShake(12, 400);
+}
+
+function decayPowers(f) {
+  for (const k of ['weak', 'vulnerable']) {
+    if (f.powers[k] > 0) { f.powers[k]--; if (f.powers[k] <= 0) delete f.powers[k]; }
   }
 }
 
-// ============================================================
-//  CARD CONDITIONS (from Slay the Web)
-// ============================================================
-function canPlayCard(card) {
-  if (card.cost > energy) return false;
-  if (card.conditions) {
-    for (const cond of card.conditions) {
-      if (cond === 'targetBelow50' && enemy.hp > enemy.maxHp * 0.5) return false;
-    }
-  }
-  return true;
+function checkWinLose() {
+  if (aliveEnemyFrogs().length === 0) { setTimeout(() => gameState = 'win', 800); return true; }
+  if (alivePlayerFrogs().length === 0) { setTimeout(() => gameState = 'lose', 800); return true; }
+  return false;
 }
 
 // ============================================================
-//  PLAY CARD (from Slay the Web pipeline)
+//  PLAY CARD
 // ============================================================
-function playCard(cardIndex) {
+function canPlayCard(card) { return card.cost <= energy; }
+
+function playCard(cardIndex, targetFrog) {
   if (gameState !== 'playerTurn') return;
   const card = hand[cardIndex];
   if (!card || !canPlayCard(card)) return;
-
   energy -= card.cost;
   hand.splice(cardIndex, 1);
-  selectedCard = -1;
-
-  // Discard or exhaust (from Slay the Web)
-  if (card.exhaust) {
-    exhaustPile.push(card);
-    spawnDamageText(player.x, player.y - 40, 'EXHAUST', '#888');
-  } else {
-    discardPile.push(card);
-  }
-
+  discardPile.push(card);
+  activeCard = card; activeCardTimer = 1500;
   gameState = 'animating';
 
-  // Process card actions
-  if (card.actions) {
-    for (const action of card.actions) {
-      if (action === 'draw1') drawCards(1);
-      if (action === 'draw2') drawCards(2);
-      if (action === 'energy1') energy = Math.min(energy + 1, ENERGY_MAX + 2);
-    }
-  }
+  const attacker = alivePlayerFrogs()[0] || playerTeam[0];
 
   switch (card.type) {
     case 'attack': {
       const hits = card.multi || 1;
-      doAttackSequence(player, enemy, card, hits, 0, () => {
-        // Thorns reflect (from Slay the Web)
-        if (enemy.powers.thorns > 0) {
-          const thornsDmg = enemy.powers.thorns;
-          player.hp = Math.max(0, player.hp - thornsDmg);
-          spawnDamageText(player.x, player.y - 70, `${thornsDmg} THORNS`, '#886644');
-          spawnParticles(player.x, player.y, 6, '#886644', 'circle');
+      doAttackSeq(attacker, targetFrog, card, hits, 0, () => {
+        applyCardPowers(card, targetFrog);
+        if (card.drain) {
+          const h = Math.floor(card.baseDmg * 0.5);
+          attacker.hp = Math.min(attacker.maxHp, attacker.hp + h);
+          spawnText(attacker.x, attacker.y - 50, `+${h}`, '#44dd66');
+          spawnParticles(attacker.x, attacker.y, 8, '#44ff66', 'circle', 3);
         }
-        // Apply powers to enemy
-        applyCardPowers(card, enemy);
-        // Drain heal action
-        if (card.actions && card.actions.includes('drainHeal')) {
-          const healAmt = Math.floor(card.baseDmg * 0.5);
-          player.hp = Math.min(player.maxHp, player.hp + healAmt);
-          spawnDamageText(player.x, player.y - 70, `+${healAmt}`, '#44dd66');
-          spawnParticles(player.x, player.y, 8, '#44ff66', 'circle', 3);
-        }
-        checkWinLose('playerTurn');
+        if (targetFrog.hp <= 0) killFrog(targetFrog);
+        if (!checkWinLose()) setTimeout(() => { gameState = 'playerTurn'; }, 200);
       });
       break;
     }
     case 'skill': {
       if (card.heal) {
-        player.hp = Math.min(player.maxHp, player.hp + card.heal);
-        spawnDamageText(player.x, player.y - 70, `+${card.heal}`, '#44dd66');
-        spawnParticles(player.x, player.y, 15, '#44ff66', 'circle', 4);
-        spawnParticles(player.x, player.y, 8, '#88ffaa', 'star', 3);
+        const t = attacker;
+        t.hp = Math.min(t.maxHp, t.hp + card.heal);
+        spawnText(t.x, t.y - 50, `+${card.heal}`, '#44dd66');
+        spawnParticles(t.x, t.y, 12, '#44ff66', 'circle', 4);
       }
       if (card.block) {
-        player.block += card.block;
-        spawnDamageText(player.x, player.y - 70, `+${card.block} BLOCK`, '#4488ff');
-        spawnParticles(player.x, player.y, 12, '#4488ff', 'star', 3);
+        attacker.block += card.block;
+        spawnText(attacker.x, attacker.y - 50, `+${card.block} BLK`, '#4488ff');
+        spawnParticles(attacker.x, attacker.y, 10, '#4488ff', 'star', 3);
       }
-      // Apply powers to enemy (e.g. Toxic Spit)
-      if (card.target === 'enemy') {
-        applyCardPowers(card, enemy);
-      } else {
-        applyCardPowers(card, player);
-      }
-      setTimeout(() => { if (gameState === 'animating') gameState = 'playerTurn'; }, 400);
+      applyCardPowers(card, targetFrog);
+      setTimeout(() => { gameState = 'playerTurn'; }, 300);
       break;
     }
     case 'power': {
-      // Self buffs (from Slay the Web power cards)
-      if (card.selfPowers) {
-        applyCardPowers(card, player);
-      } else {
-        applyCardPowers(card, enemy);
-      }
-      setTimeout(() => { if (gameState === 'animating') gameState = 'playerTurn'; }, 400);
+      const t = card.selfPowers ? attacker : targetFrog;
+      applyCardPowers(card, t);
+      setTimeout(() => { gameState = 'playerTurn'; }, 300);
       break;
     }
   }
@@ -1303,595 +584,426 @@ function playCard(cardIndex) {
 
 function applyCardPowers(card, target) {
   if (!card.powers) return;
-  for (const [key, val] of Object.entries(card.powers)) {
-    if (val <= 0) continue;
-    target.powers[key] = (target.powers[key] || 0) + val;
-    const def = POWER_DEFS[key];
-    if (def) {
-      spawnDamageText(target.x, target.y - 90, `+${val} ${def.name}`, def.color);
-      spawnParticles(target.x, target.y, 8, def.color, 'circle', 3);
-    }
+  for (const [k, v] of Object.entries(card.powers)) {
+    if (v <= 0) continue;
+    target.powers[k] = (target.powers[k] || 0) + v;
+    const d = POWER_DEFS[k];
+    if (d) { spawnText(target.x, target.y - 70, `+${v} ${d.name}`, d.color); spawnParticles(target.x, target.y, 6, d.color, 'circle', 3); }
   }
 }
 
-function doAttackSequence(attacker, target, card, totalHits, currentHit, onComplete) {
-  if (currentHit >= totalHits) {
-    onComplete();
-    return;
-  }
-  doLungeAttack(attacker, target, () => {
-    const { dmg, isCrit, effectiveness } = calcDamage(card.baseDmg, attacker, target, card.element);
-    applyDamage(target, dmg, card.color, isCrit, effectiveness);
-    spawnParticles(target.x, target.y, 12, card.color, 'spark', 8);
-    if (isCrit) spawnParticles(target.x, target.y, 8, '#ffff00', 'star', 6);
-  }, () => {
-    setTimeout(() => doAttackSequence(attacker, target, card, totalHits, currentHit + 1, onComplete), 150);
-  });
+function doAttackSeq(atk, def, card, total, cur, cb) {
+  if (cur >= total || !def.alive) { cb(); return; }
+  doLunge(atk, def, () => {
+    const { dmg, isCrit } = calcDamage(card.baseDmg, atk, def);
+    applyDamage(def, dmg, card.color, isCrit);
+    spawnParticles(def.x, def.y, 12, card.color, 'spark', 7);
+  }, () => setTimeout(() => doAttackSeq(atk, def, card, total, cur + 1, cb), 120));
 }
 
-function doLungeAttack(attacker, target, onHit, onReturn) {
-  const startX = attacker.baseX;
-  const targetX = target.x + (attacker.isPlayer ? -80 : 80);
-
-  // Anticipation: pull back slightly (from PixiJS squash/stretch)
-  tweenTo(attacker, { x: startX + (attacker.isPlayer ? -15 : 15) }, 80, easeInQuad, () => {
-    // Lunge forward
-    tweenTo(attacker, { x: targetX }, 200, easeInOutQuad, () => {
+function doLunge(atk, def, onHit, onDone) {
+  const sx = atk.baseX, tx = def.x + (atk.isPlayer ? -60 : 60);
+  tweenTo(atk, { x: sx + (atk.isPlayer ? -12 : 12) }, 70, easeInQuad, () => {
+    tweenTo(atk, { x: tx }, 180, easeInOutQuad, () => {
       onHit();
-      // Return with bounce
-      tweenTo(attacker, { x: startX }, 250, easeOutBack, () => {
-        onReturn();
-      });
+      tweenTo(atk, { x: sx }, 220, easeOutBack, onDone);
     });
   });
 }
 
-function checkWinLose(returnState = 'playerTurn') {
-  if (enemy.hp <= 0) {
-    spawnParticles(enemy.x, enemy.y, 40, '#ff4444', 'star', 12);
-    spawnParticles(enemy.x, enemy.y, 30, '#ffaa00', 'spark', 10);
-    screenShake(20, 600);
-    setTimeout(() => { gameState = 'win'; }, 1000);
-  } else if (player.hp <= 0) {
-    spawnParticles(player.x, player.y, 40, '#ff4444', 'star', 12);
-    screenShake(20, 600);
-    setTimeout(() => { gameState = 'lose'; }, 1000);
-  } else {
-    setTimeout(() => { if (gameState === 'animating') gameState = returnState; }, 100);
-  }
-}
-
 // ============================================================
-//  END TURN + ENEMY TURN (from Slay the Web)
+//  END TURN / ENEMY TURN
 // ============================================================
 function endTurn() {
   if (gameState !== 'playerTurn') return;
-  discardPile.push(...hand);
-  hand = [];
-  selectedCard = -1;
-  decayPowers(player);
+  discardPile.push(...hand); hand = [];
+  alivePlayerFrogs().forEach(decayPowers);
   gameState = 'enemyTurn';
-  setTimeout(enemyTurn, 500);
+  setTimeout(enemyTurn, 400);
 }
 
 function enemyTurn() {
-  enemy.block = 0; // reset enemy block
-  processStartOfTurn(enemy);
-  if (enemy.hp <= 0) return;
-  decayPowers(enemy);
+  // Process enemy start of turn
+  enemyTeam.forEach(f => { if (f.alive) { f.block = 0; processStartOfTurn(f); if (f.hp <= 0) killFrog(f); } });
+  if (checkWinLose()) return;
 
-  // Execute current intent
-  currentIntent = nextIntent;
-  const intent = currentIntent;
-  gameState = 'animating';
+  // Execute intents sequentially
+  const aliveEnemies = aliveEnemyFrogs();
+  let idx = 0;
+  function nextEnemyAction() {
+    if (idx >= aliveEnemies.length) {
+      // Reroll intents and start player turn
+      enemyIntents = enemyTeam.map(f => f.alive ? rollIntent(f) : null);
+      aliveEnemyFrogs().forEach(decayPowers);
+      setTimeout(() => { gameState = 'playerTurn'; startPlayerTurn(); }, 300);
+      return;
+    }
+    const ef = aliveEnemies[idx];
+    const eidx = enemyTeam.indexOf(ef);
+    const intent = enemyIntents[eidx];
+    idx++;
+    if (!intent) { nextEnemyAction(); return; }
 
-  switch (intent.type) {
-    case 'attack': {
-      doLungeAttack(enemy, player, () => {
-        // Random 85-100% roll on intent damage
-        const roll = 0.85 + Math.random() * 0.15;
-        let dmg = Math.floor(intent.dmg * roll);
-        if (enemy.powers.weak > 0) dmg = Math.floor(dmg * 0.75);
-        if (player.powers.vulnerable > 0) dmg = Math.floor(dmg * 1.5);
-        dmg = Math.max(1, dmg);
-        applyDamage(player, dmg, intent.color);
-        spawnParticles(player.x, player.y, 15, intent.color, 'spark', 8);
-        if (intent.vuln) {
-          player.powers.vulnerable = (player.powers.vulnerable || 0) + intent.vuln;
-          spawnDamageText(player.x, player.y - 100, `+${intent.vuln} VULN`, '#ff4488');
-        }
-      }, () => {
-        finishEnemyTurn();
-      });
-      break;
-    }
-    case 'poison': {
-      doLungeAttack(enemy, player, () => {
-        const roll = 0.85 + Math.random() * 0.15;
-        let dmg = Math.max(1, Math.floor(intent.dmg * roll));
-        applyDamage(player, dmg, intent.color);
-        player.powers.poison = (player.powers.poison || 0) + intent.poisonAmt;
-        spawnDamageText(player.x, player.y - 100, `+${intent.poisonAmt} PSN`, '#cc66ff');
-        spawnParticles(player.x, player.y, 15, '#aa44ff', 'circle', 6);
-      }, () => {
-        finishEnemyTurn();
-      });
-      break;
-    }
-    case 'heal': {
-      enemy.hp = Math.min(enemy.maxHp, enemy.hp + intent.heal);
-      spawnDamageText(enemy.x, enemy.y - 70, `+${intent.heal}`, '#44dd66');
-      spawnParticles(enemy.x, enemy.y, 15, '#44ff66', 'circle', 4);
-      setTimeout(finishEnemyTurn, 600);
-      break;
-    }
-    case 'block': {
-      enemy.block += intent.block;
-      spawnDamageText(enemy.x, enemy.y - 70, `+${intent.block} BLOCK`, '#4488ff');
-      spawnParticles(enemy.x, enemy.y, 12, '#4488ff', 'star', 3);
-      setTimeout(finishEnemyTurn, 600);
-      break;
-    }
-    case 'debuff': {
-      if (intent.weak) {
-        player.powers.weak = (player.powers.weak || 0) + intent.weak;
-        spawnDamageText(player.x, player.y - 70, `+${intent.weak} WEAK`, '#8866aa');
-        spawnParticles(player.x, player.y, 10, '#8866aa', 'circle', 4);
+    gameState = 'animating';
+    const target = randomAlive(playerTeam);
+    if (!target) { checkWinLose(); return; }
+
+    switch (intent.type) {
+      case 'attack': {
+        doLunge(ef, target, () => {
+          let dmg = Math.max(1, Math.floor(intent.dmg * (0.85 + Math.random() * 0.15)));
+          if (ef.powers.weak > 0) dmg = Math.floor(dmg * 0.75);
+          if (target.powers.vulnerable > 0) dmg = Math.floor(dmg * 1.5);
+          applyDamage(target, dmg, intent.color);
+          spawnParticles(target.x, target.y, 12, intent.color, 'spark', 7);
+          if (intent.vuln) { target.powers.vulnerable = (target.powers.vulnerable || 0) + intent.vuln; spawnText(target.x, target.y - 70, `+${intent.vuln} VULN`, '#ff4488'); }
+          if (target.hp <= 0) killFrog(target);
+        }, () => { if (!checkWinLose()) setTimeout(nextEnemyAction, 300); });
+        break;
       }
-      setTimeout(finishEnemyTurn, 600);
-      break;
+      case 'poison': {
+        doLunge(ef, target, () => {
+          let dmg = Math.max(1, Math.floor(intent.dmg * (0.85 + Math.random() * 0.15)));
+          applyDamage(target, dmg, intent.color);
+          target.powers.poison = (target.powers.poison || 0) + intent.poisonAmt;
+          spawnText(target.x, target.y - 70, `+${intent.poisonAmt} PSN`, '#cc66ff');
+          spawnParticles(target.x, target.y, 12, '#aa44ff', 'circle', 5);
+          if (target.hp <= 0) killFrog(target);
+        }, () => { if (!checkWinLose()) setTimeout(nextEnemyAction, 300); });
+        break;
+      }
+      case 'heal': {
+        ef.hp = Math.min(ef.maxHp, ef.hp + intent.heal);
+        spawnText(ef.x, ef.y - 50, `+${intent.heal}`, '#44dd66');
+        spawnParticles(ef.x, ef.y, 12, '#44ff66', 'circle', 4);
+        setTimeout(nextEnemyAction, 500);
+        break;
+      }
+      case 'block': {
+        ef.block += intent.block;
+        spawnText(ef.x, ef.y - 50, `+${intent.block} BLK`, '#4488ff');
+        spawnParticles(ef.x, ef.y, 10, '#4488ff', 'star', 3);
+        setTimeout(nextEnemyAction, 500);
+        break;
+      }
+      case 'debuff': {
+        if (intent.weak) {
+          target.powers.weak = (target.powers.weak || 0) + intent.weak;
+          spawnText(target.x, target.y - 50, `+${intent.weak} WEAK`, '#8866aa');
+          spawnParticles(target.x, target.y, 8, '#8866aa', 'circle', 3);
+        }
+        setTimeout(nextEnemyAction, 500);
+        break;
+      }
+      default: setTimeout(nextEnemyAction, 300);
     }
-    case 'drain': {
-      doLungeAttack(enemy, player, () => {
-        const roll = 0.85 + Math.random() * 0.15;
-        let dmg = Math.max(1, Math.floor(intent.dmg * roll));
-        applyDamage(player, dmg, intent.color);
-        enemy.hp = Math.min(enemy.maxHp, enemy.hp + intent.healAmt);
-        spawnDamageText(enemy.x, enemy.y - 70, `+${intent.healAmt}`, '#44dd66');
-      }, () => {
-        finishEnemyTurn();
-      });
-      break;
-    }
-    default:
-      setTimeout(finishEnemyTurn, 600);
   }
+  setTimeout(nextEnemyAction, 200);
 }
 
-function finishEnemyTurn() {
-  if (player.hp <= 0) {
-    checkWinLose();
-    return;
-  }
-  nextIntent = rollIntent();
-  setTimeout(() => {
-    if (gameState === 'animating' || gameState === 'enemyTurn') {
-      gameState = 'playerTurn';
-      startPlayerTurn();
-    }
-  }, 400);
+function randomAlive(team) {
+  const a = team.filter(f => f.alive);
+  return a.length ? a[Math.floor(Math.random() * a.length)] : null;
 }
 
 // ============================================================
 //  DRAWING
 // ============================================================
-function drawBackground() {
-  const bgCanvas = bgCanvases[currentBg];
-  if (bgCanvas) {
-    ctx.drawImage(bgCanvas, 0, 0, W, H);
-    const vig = ctx.createRadialGradient(480, 320, 200, 480, 320, 520);
-    vig.addColorStop(0, 'rgba(0,0,0,0)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.45)');
-    ctx.fillStyle = vig;
-    ctx.fillRect(0, 0, W, H);
-  } else {
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#1a1a3e');
-    grad.addColorStop(1, '#0d2137');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-  }
-  ctx.save();
-  ctx.font = '11px "Segoe UI", Arial';
-  ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.fillText(BG_NAMES[currentBg] || '', W - 12, H - 6);
-  ctx.restore();
+function drawBG() {
+  if (bgCanvas) ctx.drawImage(bgCanvas, 0, 0);
+  else { ctx.fillStyle = '#4a9a30'; ctx.fillRect(0, 0, W, H); }
 }
 
-function drawSprite(fighter) {
-  const img = images[fighter.imgKey];
-  if (!img) return;
-  const fd = FRAME_DATA_6[fighter.frame];
+function drawFrog(f) {
+  if (!f.alive) return;
+  const img = images[f.imgKey]; if (!img) return;
+  const fd = FRAME_DATA[f.frame];
   ctx.save();
-  const dx = fighter.x;
-  const dy = fighter.y;
+  const dx = f.x, dy = f.y;
 
   // Shadow
-  ctx.globalAlpha = 0.3;
-  ctx.fillStyle = '#000';
-  ctx.beginPath();
-  ctx.ellipse(dx, dy + fd.h * fighter.scale / 2 + 10, 45 * fighter.scaleX, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.globalAlpha = 0.25; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(dx, dy + fd.h * f.scale / 2 + 8, 35 * f.scaleX, 10, 0, 0, 6.28); ctx.fill();
   ctx.globalAlpha = 1;
 
   ctx.translate(dx, dy);
+  ctx.scale(f.isPlayer ? f.scaleX : -f.scaleX, f.scaleY);
 
-  // Mirror enemy
-  const flipX = fighter.isPlayer ? 1 : -1;
-  ctx.scale(flipX * fighter.scaleX, fighter.scaleY);
+  if (f.flash > 0) ctx.globalAlpha = 0.6 + 0.4 * Math.sin(f.flash * 0.06);
+  const bounce = Math.sin(performance.now() * 0.003 + f.slot * 2.1) * 3;
+  ctx.drawImage(img, fd.x, fd.y, fd.w, fd.h, -fd.w * f.scale / 2, -fd.h * f.scale / 2 + bounce, fd.w * f.scale, fd.h * f.scale);
 
-  // Hit flash
-  if (fighter.flash > 0) {
-    ctx.globalAlpha = 0.6 + 0.4 * Math.sin(fighter.flash * 0.06);
-  }
-
-  // Idle bounce (sine wave from PixiJS patterns)
-  const bounce = Math.sin(performance.now() * 0.003 + (fighter.isPlayer ? 0 : Math.PI)) * 4;
-
-  ctx.drawImage(img,
-    fd.x, fd.y, fd.w, fd.h,
-    -fd.w * fighter.scale / 2, -fd.h * fighter.scale / 2 + bounce,
-    fd.w * fighter.scale, fd.h * fighter.scale
-  );
-
-  // Flash overlay
-  if (fighter.flash > 0) {
+  if (f.flash > 0) {
     ctx.globalCompositeOperation = 'source-atop';
-    ctx.fillStyle = fighter.flashColor;
-    ctx.globalAlpha = fighter.flash / 500;
-    ctx.fillRect(-fd.w * fighter.scale / 2, -fd.h * fighter.scale / 2 + bounce,
-      fd.w * fighter.scale, fd.h * fighter.scale);
+    ctx.fillStyle = f.flashColor; ctx.globalAlpha = f.flash / 500;
+    ctx.fillRect(-fd.w * f.scale / 2, -fd.h * f.scale / 2 + bounce, fd.w * f.scale, fd.h * f.scale);
   }
   ctx.restore();
 
   // Block aura
-  if (fighter.block > 0) {
-    ctx.save();
-    ctx.globalAlpha = 0.2 + 0.1 * Math.sin(performance.now() * 0.005);
-    ctx.strokeStyle = '#44aaff';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.ellipse(dx, dy, 65, 55, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.06;
-    ctx.fillStyle = '#44aaff';
-    ctx.fill();
+  if (f.block > 0) {
+    ctx.save(); ctx.globalAlpha = 0.2 + 0.1 * Math.sin(performance.now() * 0.005);
+    ctx.strokeStyle = '#44aaff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(dx, dy, 50, 40, 0, 0, 6.28); ctx.stroke();
     ctx.restore();
   }
-
-  // Status effect indicators under sprite
-  drawStatusIcons(fighter, dx, dy + 65);
 }
 
-function drawStatusIcons(fighter, x, y) {
-  const keys = Object.keys(fighter.powers);
-  if (keys.length === 0) return;
-  const startX = x - (keys.length * 18) / 2;
-  ctx.save();
-  ctx.font = '11px Arial';
-  ctx.textAlign = 'center';
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i];
-    const def = POWER_DEFS[key];
-    if (!def) continue;
-    const px = startX + i * 20;
-    const bobble = Math.sin(performance.now() * 0.004 + i) * 2;
-    ctx.globalAlpha = 0.85;
-    ctx.fillStyle = def.color;
-    ctx.beginPath();
-    ctx.arc(px, y + bobble, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 9px "Segoe UI"';
-    ctx.fillText(fighter.powers[key], px, y + bobble + 3);
-  }
-  ctx.restore();
-}
-
-function drawHPBar(fighter, x, y, width) {
-  const barH = 24;
-  const hpPct = Math.max(0, fighter.hp / fighter.maxHp);
-  const hpColor = hpPct > 0.5 ? '#44dd66' : hpPct > 0.25 ? '#ddaa44' : '#dd4444';
+function drawFrogHP(f) {
+  if (!f.alive) return;
+  const bw = 60, bh = 8;
+  const bx = f.x - bw / 2, by = f.y - f.scale * 30 - 18;
+  const pct = Math.max(0, f.hp / f.maxHp);
+  const col = pct > 0.5 ? '#44dd55' : pct > 0.25 ? '#ddaa33' : '#dd3333';
 
   // Background
-  ctx.fillStyle = '#0a0a1a';
-  ctx.strokeStyle = '#444466';
-  ctx.lineWidth = 2;
-  roundRect(x, y, width, barH, 6, true, true);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; rrect(bx - 1, by - 1, bw + 2, bh + 2, 4, true, false);
+  // Fill
+  if (pct > 0) { ctx.fillStyle = col; rrect(bx, by, bw * pct, bh, 3, true, false); }
+  // HP number
+  ctx.font = 'bold 11px "Segoe UI"'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+  ctx.strokeText(f.hp, f.x, by - 3); ctx.fillText(f.hp, f.x, by - 3);
 
-  // HP fill
-  if (hpPct > 0) {
-    const grad = ctx.createLinearGradient(x, y, x, y + barH);
-    grad.addColorStop(0, hpColor);
-    grad.addColorStop(1, shadeColor(hpColor, -30));
-    ctx.fillStyle = grad;
-    roundRect(x + 2, y + 2, (width - 4) * hpPct, barH - 4, 4, true, false);
-  }
-
-  // Block overlay
-  if (fighter.block > 0) {
-    ctx.fillStyle = 'rgba(68, 136, 255, 0.35)';
-    const blockPct = Math.min(1, fighter.block / 30);
-    roundRect(x + 2, y + 2, (width - 4) * blockPct, barH - 4, 4, true, false);
-  }
-
-  // HP text
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 13px "Segoe UI", Arial';
-  ctx.textAlign = 'center';
-  ctx.fillText(`${Math.max(0, fighter.hp)} / ${fighter.maxHp}`, x + width / 2, y + barH - 7);
-
-  // Name + element above
-  ctx.font = 'bold 14px "Segoe UI", Arial';
-  ctx.fillStyle = '#ddd';
-  const elemIcon = fighter.element === 'fire' ? '🔥' : fighter.element === 'water' ? '💧' : fighter.element === 'grass' ? '🌿' : '';
-  ctx.fillText(`${elemIcon} ${fighter.name}`, x + width / 2, y - 8);
-
-  // Block / status to the right
-  let sx = x + width + 8;
-  ctx.textAlign = 'left';
-  ctx.font = '13px Arial';
-  if (fighter.block > 0) {
-    ctx.fillStyle = '#4488ff';
-    ctx.fillText(`🛡️${fighter.block}`, sx, y + 16);
-    sx += 45;
+  // Status icons
+  const keys = Object.keys(f.powers);
+  for (let i = 0; i < keys.length; i++) {
+    const d = POWER_DEFS[keys[i]]; if (!d) continue;
+    const sx = f.x - (keys.length * 10) + i * 20;
+    const sy = by + bh + 14;
+    ctx.globalAlpha = 0.85; ctx.fillStyle = d.color;
+    ctx.beginPath(); ctx.arc(sx, sy, 8, 0, 6.28); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 8px "Segoe UI"'; ctx.textAlign = 'center';
+    ctx.fillText(f.powers[keys[i]], sx, sy + 3);
+    ctx.globalAlpha = 1;
   }
 }
 
-function drawIntent() {
-  if (!nextIntent || gameState === 'win' || gameState === 'lose') return;
-  const ix = enemy.x;
-  const iy = 60;
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.globalAlpha = 0.85;
+function drawEnemyIntents() {
+  if (gameState === 'win' || gameState === 'lose') return;
+  for (let i = 0; i < enemyTeam.length; i++) {
+    const f = enemyTeam[i]; if (!f.alive || !enemyIntents[i]) continue;
+    const intent = enemyIntents[i];
+    const ix = f.x, iy = f.y - f.scale * 30 - 48;
 
-  // Intent box
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  roundRect(ix - 50, iy - 8, 100, 34, 6, true, false);
-  ctx.strokeStyle = nextIntent.color + '88';
-  ctx.lineWidth = 1;
-  roundRect(ix - 50, iy - 8, 100, 34, 6, false, true);
+    ctx.save(); ctx.globalAlpha = 0.75; ctx.textAlign = 'center';
+    // Bubble
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.strokeStyle = intent.color + '88'; ctx.lineWidth = 1.5;
+    rrect(ix - 28, iy - 6, 56, 22, 11, true, true);
+    // Icon + value
+    ctx.font = '11px Arial'; ctx.fillStyle = '#fff';
+    if (intent.dmg) ctx.fillText(`⚔️${intent.dmg}`, ix, iy + 11);
+    else if (intent.heal) ctx.fillText(`💚${intent.heal}`, ix, iy + 11);
+    else if (intent.block) ctx.fillText(`🛡️${intent.block}`, ix, iy + 11);
+    else if (intent.weak) ctx.fillText(`😩${intent.weak}`, ix, iy + 11);
+    ctx.restore();
+  }
+}
 
-  ctx.font = '16px Arial';
-  ctx.fillText(nextIntent.icon, ix - 30, iy + 16);
-  ctx.font = 'bold 12px "Segoe UI"';
-  ctx.fillStyle = nextIntent.color;
-  ctx.fillText(nextIntent.name, ix + 10, iy + 8);
-
-  // Show damage/effect value
-  ctx.font = '11px "Segoe UI"';
-  ctx.fillStyle = '#ccc';
-  if (nextIntent.dmg) ctx.fillText(`${nextIntent.dmg} dmg`, ix + 10, iy + 22);
-  else if (nextIntent.heal) ctx.fillText(`+${nextIntent.heal} HP`, ix + 10, iy + 22);
-  else if (nextIntent.block) ctx.fillText(`+${nextIntent.block} blk`, ix + 10, iy + 22);
-  else if (nextIntent.weak) ctx.fillText(`${nextIntent.weak} weak`, ix + 10, iy + 22);
-
+function drawActiveCard() {
+  if (!activeCard || activeCardTimer <= 0) return;
+  const a = Math.min(1, activeCardTimer / 400);
+  ctx.save(); ctx.globalAlpha = a;
+  const cx = W / 2, cy = 65;
+  // Card preview at top center (like Axie)
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; rrect(cx - 55, cy - 50, 110, 100, 12, true, false);
+  ctx.strokeStyle = activeCard.color; ctx.lineWidth = 2; rrect(cx - 55, cy - 50, 110, 100, 12, false, true);
+  ctx.font = '22px Arial'; ctx.textAlign = 'center'; ctx.fillText(activeCard.icon, cx, cy - 10);
+  ctx.font = 'bold 12px "Segoe UI"'; ctx.fillStyle = '#fff'; ctx.fillText(activeCard.name, cx, cy + 12);
+  ctx.font = '10px "Segoe UI"'; ctx.fillStyle = '#ccc'; ctx.fillText(activeCard.desc, cx, cy + 28);
   ctx.restore();
 }
 
-function drawCards() {
+function drawHandCards() {
   if (gameState !== 'playerTurn') return;
-  const cardW = 90, cardH = 130, gap = 6;
+  const cardW = 120, cardH = 170, gap = 10;
   const totalW = hand.length * (cardW + gap) - gap;
-  const startX = Math.max(10, (W - totalW) / 2);
-  const baseY = H - cardH - 18;
+  const startX = Math.max(80, (W - totalW) / 2);
+  const baseY = H - cardH - 12;
 
   for (let i = 0; i < hand.length; i++) {
     const card = hand[i];
+    const isHov = i === hoveredCard;
+    const canA = canPlayCard(card);
     const x = startX + i * (cardW + gap);
-    const isHovered = i === hoveredCard;
-    const canAfford = canPlayCard(card);
-    const y = isHovered ? baseY - 25 : baseY;
+    const y = isHov ? baseY - 30 : baseY;
 
     ctx.save();
 
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    roundRect(x + 3, y + 3, cardW, cardH, 8, true, false);
+    // Card shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrect(x + 4, y + 4, cardW, cardH, 14, true, false);
 
-    // Card background
-    const grad = ctx.createLinearGradient(x, y, x, y + cardH);
-    grad.addColorStop(0, canAfford ? '#2a2a4a' : '#1e1e2a');
-    grad.addColorStop(1, canAfford ? '#1a1a3a' : '#141420');
-    ctx.fillStyle = grad;
-    ctx.strokeStyle = isHovered && canAfford ? '#aaaaff' : canAfford ? card.color + '66' : '#2a2a2a';
-    ctx.lineWidth = isHovered ? 2.5 : 1.5;
-    roundRect(x, y, cardW, cardH, 8, true, true);
+    // Card bg — warm gradient like Axie cards
+    const cg = ctx.createLinearGradient(x, y, x, y + cardH);
+    cg.addColorStop(0, canA ? '#f5e6d0' : '#aaa8a0');
+    cg.addColorStop(1, canA ? '#e8d0b0' : '#908880');
+    ctx.fillStyle = cg;
+    ctx.strokeStyle = isHov && canA ? '#ffcc44' : canA ? card.color : '#666';
+    ctx.lineWidth = isHov ? 3 : 2;
+    rrect(x, y, cardW, cardH, 14, true, true);
 
-    // Color accent bar
-    ctx.fillStyle = canAfford ? card.color : '#333';
-    roundRect(x + 4, y + 4, cardW - 8, 3, 2, true, false);
+    ctx.globalAlpha = canA ? 1 : 0.4;
 
-    // Exhaust indicator
-    if (card.exhaust) {
-      ctx.fillStyle = '#ffcc0033';
-      roundRect(x + 2, y + 2, cardW - 4, cardH - 4, 6, true, false);
+    // Creature portrait area (top half of card)
+    const pGrad = ctx.createLinearGradient(x, y + 8, x, y + 80);
+    pGrad.addColorStop(0, card.color + '44');
+    pGrad.addColorStop(1, card.color + '22');
+    ctx.fillStyle = pGrad;
+    rrect(x + 6, y + 6, cardW - 12, 72, 10, true, false);
+
+    // Draw the frog sprite on the card
+    const sImg = images[card.sprite];
+    if (sImg) {
+      const sf = FRAME_DATA[0];
+      ctx.drawImage(sImg, sf.x, sf.y, sf.w, sf.h, x + 20, y + 12, 80, 60);
     }
 
-    ctx.globalAlpha = canAfford ? 1 : 0.35;
+    // Cost bubble (top-left, colored like Axie)
+    ctx.beginPath(); ctx.arc(x + 16, y + 16, 14, 0, 6.28);
+    ctx.fillStyle = canA ? card.color : '#666'; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = 'bold 15px "Segoe UI"'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff'; ctx.fillText(card.cost, x + 16, y + 21);
 
-    // Icon
-    ctx.font = '24px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(card.icon, x + cardW / 2, y + 40);
-
-    // Name
-    ctx.font = 'bold 11px "Segoe UI"';
-    ctx.fillStyle = '#fff';
-    ctx.fillText(card.name, x + cardW / 2, y + 60);
+    // Card name bar
+    ctx.fillStyle = card.color; rrect(x + 4, y + 80, cardW - 8, 24, 0, true, false);
+    ctx.font = 'bold 12px "Segoe UI"'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.fillText(card.name, x + cardW / 2, y + 96);
 
     // Description
-    ctx.font = '9px "Segoe UI"';
-    ctx.fillStyle = '#aaa';
-    // Word wrap desc
-    const words = card.desc.split(' ');
-    let line = '', ly = y + 75;
-    for (const word of words) {
-      const test = line + word + ' ';
-      if (ctx.measureText(test).width > cardW - 12 && line) {
-        ctx.fillText(line.trim(), x + cardW / 2, ly);
-        line = word + ' ';
-        ly += 11;
-      } else {
-        line = test;
-      }
-    }
-    ctx.fillText(line.trim(), x + cardW / 2, ly);
+    ctx.font = '10px "Segoe UI"'; ctx.fillStyle = '#5a4a3a'; ctx.textAlign = 'center';
+    ctx.fillText(card.desc, x + cardW / 2, y + 120);
 
-    // Element badge
-    if (card.element && card.element !== 'neutral') {
-      ctx.font = '10px Arial';
-      const elemIcon = card.element === 'fire' ? '🔥' : card.element === 'water' ? '💧' : '🌿';
-      ctx.fillText(elemIcon, x + 12, y + 18);
+    // Damage/effect number
+    if (card.baseDmg) {
+      ctx.font = 'bold 22px "Segoe UI"'; ctx.fillStyle = '#c03020';
+      ctx.fillText(card.baseDmg, x + cardW / 2, y + 152);
+    } else if (card.heal) {
+      ctx.font = 'bold 22px "Segoe UI"'; ctx.fillStyle = '#33aa44';
+      ctx.fillText(card.heal, x + cardW / 2, y + 152);
+    } else if (card.block) {
+      ctx.font = 'bold 22px "Segoe UI"'; ctx.fillStyle = '#3377cc';
+      ctx.fillText(card.block, x + cardW / 2, y + 152);
     }
-
-    // Exhaust label
-    if (card.exhaust) {
-      ctx.font = 'bold 8px "Segoe UI"';
-      ctx.fillStyle = '#ffcc00';
-      ctx.fillText('EXHAUST', x + cardW / 2, y + cardH - 8);
-    }
-
-    // Energy cost (top-right)
-    ctx.globalAlpha = 1;
-    ctx.beginPath();
-    ctx.arc(x + cardW - 13, y + 13, 12, 0, Math.PI * 2);
-    ctx.fillStyle = canAfford ? '#3355aa' : '#221133';
-    ctx.fill();
-    ctx.strokeStyle = canAfford ? '#5577cc' : '#332244';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.font = 'bold 13px "Segoe UI"';
-    ctx.fillStyle = canAfford ? '#aaddff' : '#443355';
-    ctx.fillText(card.cost, x + cardW - 13, y + 18);
 
     ctx.restore();
   }
 }
 
-function drawEnergyBar() {
-  const x = 20, y = H - 50;
-  ctx.font = 'bold 13px "Segoe UI"';
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#aaddff';
-  ctx.fillText('ENERGY', x, y - 6);
-
-  for (let i = 0; i < ENERGY_MAX; i++) {
-    ctx.beginPath();
-    ctx.arc(x + 14 + i * 28, y + 10, 11, 0, Math.PI * 2);
-    ctx.fillStyle = i < energy ? '#4488ff' : '#181830';
-    ctx.fill();
-    ctx.strokeStyle = i < energy ? '#6699ff' : '#2a2a44';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    if (i < energy) {
-      ctx.beginPath();
-      ctx.arc(x + 14 + i * 28, y + 8, 4, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.fill();
-    }
-  }
-
-  // Deck / discard counts
-  ctx.font = '11px "Segoe UI"';
-  ctx.fillStyle = '#888';
-  ctx.textAlign = 'left';
-  ctx.fillText(`Draw: ${drawPile.length}  Disc: ${discardPile.length}  Exh: ${exhaustPile.length}`, x + 100, y + 14);
-}
-
-function drawEndTurnButton() {
-  if (gameState !== 'playerTurn') return;
-  const bx = W - 130, by = H - 58, bw = 105, bh = 38;
-  ctx.fillStyle = endTurnHovered ? '#4455aa' : '#2a3366';
-  ctx.strokeStyle = endTurnHovered ? '#7799ff' : '#445588';
-  ctx.lineWidth = 2;
-  roundRect(bx, by, bw, bh, 8, true, true);
-  ctx.font = 'bold 14px "Segoe UI"';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = endTurnHovered ? '#fff' : '#99aacc';
-  ctx.fillText('END TURN', bx + bw / 2, by + bh / 2 + 5);
-}
-
-function drawTurnIndicator() {
-  ctx.font = 'bold 14px "Segoe UI"';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#777';
-  ctx.fillText(`Turn ${turnNumber}`, W / 2, 22);
-  if (gameState === 'playerTurn') {
-    ctx.fillStyle = '#44dd66';
-    ctx.font = 'bold 15px "Segoe UI"';
-    ctx.fillText('YOUR TURN', W / 2, 42);
-  } else if (gameState === 'enemyTurn' || gameState === 'animating') {
-    ctx.fillStyle = '#ff6644';
-    ctx.font = 'bold 15px "Segoe UI"';
-    ctx.fillText('ENEMY TURN', W / 2, 42);
-  }
-}
-
-function drawWinLoseScreen() {
+function drawEnergyVase() {
+  const vx = 42, vy = H - 95;
+  // Vase shape
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.75)';
-  ctx.fillRect(0, 0, W, H);
-
-  const isWin = gameState === 'win';
-  ctx.textAlign = 'center';
-
-  ctx.font = 'bold 60px "Segoe UI"';
-  ctx.strokeStyle = '#000'; ctx.lineWidth = 6;
-  ctx.strokeText(isWin ? 'VICTORY!' : 'DEFEAT', W / 2, H / 2 - 40);
-  ctx.fillStyle = isWin ? '#44dd66' : '#dd4444';
-  ctx.fillText(isWin ? 'VICTORY!' : 'DEFEAT', W / 2, H / 2 - 40);
-
-  ctx.font = '22px "Segoe UI"';
-  ctx.fillStyle = '#aaa';
-  ctx.fillText(isWin ? 'The enemy frog has been vanquished!' : 'Your frog has fallen...', W / 2, H / 2 + 10);
-
-  ctx.font = '15px "Segoe UI"';
-  ctx.fillStyle = '#777';
-  ctx.fillText(`Completed in ${turnNumber} turns`, W / 2, H / 2 + 45);
-
-  // Restart button
-  const bx = W / 2 - 75, by = H / 2 + 70;
-  ctx.fillStyle = restartHovered ? '#4455aa' : '#2a3366';
-  ctx.strokeStyle = '#556699'; ctx.lineWidth = 2;
-  roundRect(bx, by, 150, 42, 10, true, true);
-  ctx.font = 'bold 17px "Segoe UI"';
-  ctx.fillStyle = '#fff';
-  ctx.fillText('PLAY AGAIN', W / 2, by + 28);
-
-  if (Math.random() > 0.7) {
-    spawnParticles(Math.random() * W, Math.random() * H / 2, 1, isWin ? '#44dd66' : '#dd4444', 'star', 2);
+  ctx.fillStyle = '#8899aa';
+  ctx.beginPath();
+  ctx.moveTo(vx - 18, vy); ctx.quadraticCurveTo(vx - 22, vy + 30, vx - 16, vy + 45);
+  ctx.lineTo(vx + 16, vy + 45); ctx.quadraticCurveTo(vx + 22, vy + 30, vx + 18, vy);
+  ctx.closePath(); ctx.fill();
+  // Rim
+  ctx.fillStyle = '#99aabb';
+  ctx.beginPath(); ctx.ellipse(vx, vy, 20, 6, 0, 0, 6.28); ctx.fill();
+  // Liquid fill (energy)
+  const fillPct = energy / ENERGY_MAX;
+  if (fillPct > 0) {
+    ctx.fillStyle = '#44aaff';
+    const fh = 40 * fillPct;
+    ctx.beginPath();
+    ctx.moveTo(vx - 16, vy + 45 - fh); ctx.quadraticCurveTo(vx - 17, vy + 45, vx - 16, vy + 45);
+    ctx.lineTo(vx + 16, vy + 45); ctx.quadraticCurveTo(vx + 17, vy + 45, vx + 16, vy + 45 - fh);
+    ctx.closePath(); ctx.fill();
+    // Shine
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.beginPath(); ctx.ellipse(vx - 5, vy + 45 - fh + 5, 6, 3, 0, 0, 6.28); ctx.fill();
   }
+  // Energy number
+  ctx.font = 'bold 18px "Segoe UI"'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#226'; ctx.lineWidth = 3;
+  ctx.strokeText(energy, vx, vy + 30); ctx.fillText(energy, vx, vy + 30);
   ctx.restore();
 }
 
-// ============================================================
-//  UTILITY
-// ============================================================
-function roundRect(x, y, w, h, r, fill, stroke) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-  if (fill) ctx.fill();
-  if (stroke) ctx.stroke();
+function drawEndTurnBtn() {
+  if (gameState !== 'playerTurn') return;
+  const bx = W - 75, by = H - 85, br = 38;
+  ctx.save();
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.arc(bx + 2, by + 3, br, 0, 6.28); ctx.fill();
+  // Button
+  const grad = ctx.createRadialGradient(bx, by - 5, 5, bx, by, br);
+  grad.addColorStop(0, endTurnHovered ? '#ff5544' : '#e84030');
+  grad.addColorStop(1, endTurnHovered ? '#cc3322' : '#b82818');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.28); ctx.fill();
+  // Border
+  ctx.strokeStyle = '#ffaa88'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.28); ctx.stroke();
+  // Text
+  ctx.font = 'bold 13px "Segoe UI"'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+  ctx.fillText('End', bx, by - 3); ctx.fillText('Turn', bx, by + 13);
+  ctx.restore();
 }
 
-function shadeColor(color, percent) {
-  const num = parseInt(color.replace('#', ''), 16);
-  const r = Math.min(255, Math.max(0, (num >> 16) + percent));
-  const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + percent));
-  const b = Math.min(255, Math.max(0, (num & 0xff) + percent));
-  return `rgb(${r},${g},${b})`;
+function drawPlayerInfo() {
+  // Top-left info panel (like Axie)
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; rrect(10, 8, 160, 35, 8, true, false);
+  ctx.font = 'bold 14px "Segoe UI"'; ctx.textAlign = 'left'; ctx.fillStyle = '#fff';
+  ctx.fillText('Player', 20, 25);
+  ctx.font = '11px "Segoe UI"'; ctx.fillStyle = '#aaddff';
+  ctx.fillText(`Lv. 05`, 20, 38);
+  ctx.restore();
+}
+
+function drawTurnCounter() {
+  ctx.save(); ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; rrect(W / 2 - 45, 6, 90, 28, 14, true, false);
+  ctx.font = 'bold 14px "Segoe UI"'; ctx.fillStyle = '#fff';
+  ctx.fillText(`Turn ${turnNumber}`, W / 2, 26);
+  ctx.restore();
+}
+
+function drawDeckDiscard() {
+  ctx.save(); ctx.font = 'bold 13px "Segoe UI"'; ctx.textAlign = 'center';
+  // Deck (bottom-left)
+  ctx.fillStyle = '#5a3a1a'; rrect(8, H - 32, 30, 20, 5, true, false);
+  ctx.fillStyle = '#fff'; ctx.fillText(drawPile.length, 23, H - 17);
+  // Discard (bottom-right)
+  ctx.fillStyle = '#5a3a1a'; rrect(W - 38, H - 32, 30, 20, 5, true, false);
+  ctx.fillStyle = '#fff'; ctx.fillText(discardPile.length, W - 23, H - 17);
+  ctx.restore();
+}
+
+function drawWinLose() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, W, H);
+  const isWin = gameState === 'win';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 56px "Segoe UI"'; ctx.strokeStyle = '#000'; ctx.lineWidth = 5;
+  const txt = isWin ? 'VICTORY!' : 'DEFEAT';
+  ctx.strokeText(txt, W / 2, H / 2 - 30); ctx.fillStyle = isWin ? '#44dd66' : '#dd4444';
+  ctx.fillText(txt, W / 2, H / 2 - 30);
+  ctx.font = '20px "Segoe UI"'; ctx.fillStyle = '#ccc';
+  ctx.fillText(isWin ? 'All enemy frogs defeated!' : 'Your team has fallen...', W / 2, H / 2 + 10);
+  ctx.font = '14px "Segoe UI"'; ctx.fillStyle = '#888';
+  ctx.fillText(`${turnNumber} turns`, W / 2, H / 2 + 40);
+  // Restart
+  const bx = W / 2 - 70, by = H / 2 + 60;
+  ctx.fillStyle = restartHovered ? '#4455aa' : '#2a3366'; ctx.strokeStyle = '#5566aa'; ctx.lineWidth = 2;
+  rrect(bx, by, 140, 40, 10, true, true);
+  ctx.font = 'bold 16px "Segoe UI"'; ctx.fillStyle = '#fff'; ctx.fillText('PLAY AGAIN', W / 2, by + 27);
+  if (Math.random() > 0.75) spawnParticles(Math.random() * W, Math.random() * H / 2, 1, isWin ? '#44dd66' : '#dd4444', 'star', 2);
+  ctx.restore();
+}
+
+function rrect(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  if (fill) ctx.fill(); if (stroke) ctx.stroke();
 }
 
 // ============================================================
@@ -1901,39 +1013,30 @@ canvas.addEventListener('mousemove', (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = (e.clientX - rect.left) * (W / rect.width);
   const my = (e.clientY - rect.top) * (H / rect.height);
-
-  hoveredCard = -1;
-  endTurnHovered = false;
-  restartHovered = false;
+  hoveredCard = -1; endTurnHovered = false; restartHovered = false;
   canvas.style.cursor = 'default';
 
   if (gameState === 'playerTurn') {
-    const cardW = 90, cardH = 130, gap = 6;
+    const cardW = 120, cardH = 170, gap = 10;
     const totalW = hand.length * (cardW + gap) - gap;
-    const startX = Math.max(10, (W - totalW) / 2);
-    const baseY = H - cardH - 18;
-
+    const startX = Math.max(80, (W - totalW) / 2);
+    const baseY = H - cardH - 12;
     for (let i = 0; i < hand.length; i++) {
       const x = startX + i * (cardW + gap);
-      if (mx >= x && mx <= x + cardW && my >= baseY - 25 && my <= baseY + cardH) {
+      if (mx >= x && mx <= x + cardW && my >= baseY - 30 && my <= baseY + cardH) {
         hoveredCard = i;
         if (canPlayCard(hand[i])) canvas.style.cursor = 'pointer';
         break;
       }
     }
-    const bx = W - 130, by = H - 58;
-    if (mx >= bx && mx <= bx + 105 && my >= by && my <= by + 38) {
-      endTurnHovered = true;
-      canvas.style.cursor = 'pointer';
-    }
+    // End turn button
+    const bx = W - 75, by = H - 85;
+    if (Math.hypot(mx - bx, my - by) < 38) { endTurnHovered = true; canvas.style.cursor = 'pointer'; }
   }
 
   if (gameState === 'win' || gameState === 'lose') {
-    const bx = W / 2 - 75, by = H / 2 + 70;
-    if (mx >= bx && mx <= bx + 150 && my >= by && my <= by + 42) {
-      restartHovered = true;
-      canvas.style.cursor = 'pointer';
-    }
+    const bx = W / 2 - 70, by = H / 2 + 60;
+    if (mx >= bx && mx <= bx + 140 && my >= by && my <= by + 40) { restartHovered = true; canvas.style.cursor = 'pointer'; }
   }
 });
 
@@ -1944,69 +1047,63 @@ canvas.addEventListener('click', (e) => {
 
   if (gameState === 'playerTurn') {
     if (hoveredCard >= 0 && hand[hoveredCard] && canPlayCard(hand[hoveredCard])) {
-      playCard(hoveredCard);
+      const card = hand[hoveredCard];
+      // For attacks: target first alive enemy; for skills/powers: auto-target
+      const target = card.type === 'attack' ? findClickedEnemy(mx, my) || aliveEnemyFrogs()[0] : aliveEnemyFrogs()[0];
+      if (target || card.type !== 'attack') playCard(hoveredCard, target);
       return;
     }
     if (endTurnHovered) { endTurn(); return; }
   }
-  if ((gameState === 'win' || gameState === 'lose') && restartHovered) {
-    init();
-  }
+  if ((gameState === 'win' || gameState === 'lose') && restartHovered) init();
 });
+
+function findClickedEnemy(mx, my) {
+  for (const f of aliveEnemyFrogs()) {
+    if (Math.abs(mx - f.x) < 50 && Math.abs(my - f.y) < 50) return f;
+  }
+  return null;
+}
 
 // ============================================================
 //  GAME LOOP
 // ============================================================
 let lastTime = 0;
+function gameLoop(ts) {
+  const dt = Math.min(50, ts - (lastTime || ts));
+  lastTime = ts;
 
-function gameLoop(timestamp) {
-  const dt = Math.min(50, timestamp - (lastTime || timestamp));
-  lastTime = timestamp;
-
-  // Update sprites
-  for (const f of [player, enemy]) {
-    if (!f) continue;
+  // Update
+  allFrogs().forEach(f => {
     f.frameTimer += dt;
-    if (f.frameTimer >= f.animSpeed) {
-      f.frameTimer = 0;
-      f.frame = (f.frame + 1) % 6;
-    }
+    if (f.frameTimer >= f.animSpeed) { f.frameTimer = 0; f.frame = (f.frame + 1) % 6; }
     if (f.flash > 0) f.flash = Math.max(0, f.flash - dt);
-  }
+  });
+  if (activeCardTimer > 0) activeCardTimer -= dt;
+  updateTweens(dt); updateShake(dt); updateParticles(dt); updateTexts(dt);
 
-  updateTweens(dt);
-  updateShake(dt);
-  updateParticles(dt);
-  updateFloatingTexts(dt);
-
-  // Draw with camera shake
-  ctx.save();
-  ctx.translate(camera.offsetX, camera.offsetY);
+  // Draw
+  ctx.save(); ctx.translate(camera.offsetX, camera.offsetY);
   ctx.clearRect(-10, -10, W + 20, H + 20);
-  drawBackground();
-
-  if (player && enemy) {
-    drawSprite(player);
-    drawSprite(enemy);
-    drawHPBar(player, 30, 85, 200);
-    drawHPBar(enemy, W - 230, 85, 200);
-    drawIntent();
-    drawTurnIndicator();
+  drawBG();
+  // Draw frogs back-to-front (slot 2 first, then 1, then 0 = front)
+  for (let s = 2; s >= 0; s--) {
+    const pf = playerTeam[s], ef = enemyTeam[s];
+    if (pf) drawFrog(pf);
+    if (ef) drawFrog(ef);
   }
-  drawParticles();
-  drawFloatingTexts();
+  // HP bars on top
+  allFrogs().forEach(drawFrogHP);
+  drawEnemyIntents();
+  drawParticles(); drawTexts();
   ctx.restore();
 
-  // UI outside camera shake
-  if (player && enemy) {
-    drawCards();
-    drawEnergyBar();
-    drawEndTurnButton();
-  }
+  // UI (not affected by shake)
+  drawHandCards(); drawEnergyVase(); drawEndTurnBtn();
+  drawPlayerInfo(); drawTurnCounter(); drawDeckDiscard();
+  drawActiveCard();
 
-  if (gameState === 'win' || gameState === 'lose') {
-    drawWinLoseScreen();
-  }
+  if (gameState === 'win' || gameState === 'lose') drawWinLose();
 
   requestAnimationFrame(gameLoop);
 }
