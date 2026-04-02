@@ -56,8 +56,8 @@ const imageSources = {
   backgrounds: 'sprites/battle_backgrounds.png',
 };
 
-// Background grid: 3 cols x 2 rows, each cell 768x512 in a 1536x1024 image
-const BG_COLS = 2, BG_ROWS = 3, BG_W = 768, BG_H = 512;
+// Background grid: 2 cols x 3 rows, each cell 768x341 in a 1536x1024 image
+const BG_COLS = 2, BG_ROWS = 3, BG_W = 768, BG_H = Math.floor(1024 / 3);
 const BG_NAMES = ['Tropical', 'Volcano', 'Frozen', 'Cosmic', 'Inferno', 'Toxic Swamp'];
 let currentBg = 0;
 let loadedCount = 0;
