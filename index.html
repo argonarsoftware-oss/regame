@@ -33,40 +33,57 @@ let frogTextures = {}; // { ember: [tex0..5], toxic: [...], frost: [...] }
 // ============================================================
 //  INIT
 // ============================================================
-(async () => {
-  app = new PIXI.Application();
-  await app.init({ background: '#4a9a30', width: GW, height: GH, antialias: true });
-  document.body.appendChild(app.canvas);
-
-  // Load sprite sheets
-  const sheets = {
-    ember: await PIXI.Assets.load('sprites/ember/ember_sheet_6frame.png'),
-    toxic: await PIXI.Assets.load('sprites/toxic/toxic_sheet_6frame.png'),
-    frost: await PIXI.Assets.load('sprites/frost/frost_sheet_6frame.png'),
-  };
-
-  // Extract frames from each sheet
-  for (const [key, tex] of Object.entries(sheets)) {
-    frogTextures[key] = FRAME_DATA.map(fd =>
-      new PIXI.Texture({ source: tex.source, frame: new PIXI.Rectangle(fd.x, fd.y, fd.w, fd.h) })
-    );
-  }
-
-  // Containers
-  gameContainer = new PIXI.Container();
-  particleContainer = new PIXI.Container();
-  uiContainer = new PIXI.Container();
-  app.stage.addChild(gameContainer, particleContainer, uiContainer);
-
-  buildBackground();
-  initGame();
-
-  app.ticker.add((ticker) => {
-    const dt = ticker.deltaTime * 16.67; // ms
-    updateParticles(dt);
-    updateFloatingTexts(dt);
-    if (activeCardTimer > 0) activeCardTimer -= dt;
+// Load images the old way (works with file:// protocol)
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load: ' + src));
+    img.src = src;
   });
+}
+
+(async () => {
+  try {
+    app = new PIXI.Application();
+    await app.init({ background: '#4a9a30', width: GW, height: GH, antialias: true });
+    document.body.appendChild(app.canvas);
+
+    // Load sprite sheets via Image() (works on file:// protocol)
+    const sheetImages = {
+      ember: await loadImage('sprites/ember/ember_sheet_6frame.png'),
+      toxic: await loadImage('sprites/toxic/toxic_sheet_6frame.png'),
+      frost: await loadImage('sprites/frost/frost_sheet_6frame.png'),
+    };
+
+    // Create PixiJS textures from loaded images, then extract frames
+    for (const [key, img] of Object.entries(sheetImages)) {
+      const baseTex = PIXI.Texture.from(img);
+      frogTextures[key] = FRAME_DATA.map(fd =>
+        new PIXI.Texture({ source: baseTex.source, frame: new PIXI.Rectangle(fd.x, fd.y, fd.w, fd.h) })
+      );
+    }
+
+    // Containers
+    gameContainer = new PIXI.Container();
+    particleContainer = new PIXI.Container();
+    uiContainer = new PIXI.Container();
+    app.stage.addChild(gameContainer, particleContainer, uiContainer);
+
+    buildBackground();
+    initGame();
+
+    app.ticker.add((ticker) => {
+      const dt = ticker.deltaTime * 16.67; // ms
+      updateParticles(dt);
+      updateFloatingTexts(dt);
+      if (activeCardTimer > 0) activeCardTimer -= dt;
+    });
+  } catch (e) {
+    console.error('Game init error:', e);
+    document.body.style.color = '#fff';
+    document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif"><h2>Loading Error</h2><p>' + e.message + '</p><p>Try running a local server: <code>npx serve .</code> or <code>python -m http.server</code></p></div>';
+  }
 })();
 
 // ============================================================
