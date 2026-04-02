@@ -32,10 +32,13 @@ canvas { display: block; cursor: default; image-rendering: pixelated; }
 
 <script>
 // ============================================================
-//  FROG LEGENDS — Axie-style Turn-Based Battle
+//  FROG LEGENDS — Axie-style Turn-Based Battle (v2)
+//  Patterns from: Slay the Web, Ancient Beast, Pokemon Showdown,
+//  Creature Chess, PixiJS Open Games
 // ============================================================
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
 
 // ---- Sprite sheet frame data (from manifest.json bbox) ----
 const FRAME_DATA_6 = [
@@ -55,89 +58,147 @@ const imageSources = {
   frost:  'sprites/frost/frost_sheet_6frame.png',
   backgrounds: 'sprites/battle_backgrounds.png',
 };
-
-// Background grid: 2 cols x 3 rows, each cell 768x341 in a 1536x1024 image
 const BG_COLS = 2, BG_ROWS = 3, BG_W = 768, BG_H = Math.floor(1024 / 3);
 const BG_NAMES = ['Tropical', 'Volcano', 'Frozen', 'Cosmic', 'Inferno', 'Toxic Swamp'];
 let currentBg = 0;
 let loadedCount = 0;
 const totalImages = Object.keys(imageSources).length;
-
 for (const [key, src] of Object.entries(imageSources)) {
   const img = new Image();
   img.onload = () => { loadedCount++; if (loadedCount >= totalImages) init(); };
-  img.onerror = () => { console.error('Failed to load', src); };
+  img.onerror = () => console.error('Failed to load', src);
   img.src = src;
   images[key] = img;
 }
 
-// ---- Game state ----
-const ENERGY_MAX = 4;
-let gameState = 'loading'; // loading, battle, playerTurn, enemyTurn, animating, win, lose
-let turnNumber = 0;
+// ============================================================
+//  TWEEN ENGINE (from PixiJS Open Games patterns)
+// ============================================================
+function easeOutQuad(t) { return t * (2 - t); }
+function easeOutBack(t) { const s = 1.70158; return 1 + (--t) * t * ((s + 1) * t + s); }
+function easeOutElastic(t) {
+  return t === 0 || t === 1 ? t : Math.pow(2, -10 * t) * Math.sin((t - 0.1) * 5 * Math.PI) + 1;
+}
+function easeInQuad(t) { return t * t; }
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
-const CARDS = [
-  { name: 'Slash',     cost: 1, dmg: 18, type: 'attack',  color: '#ff6644', icon: '⚔️',  desc: 'Basic attack' },
-  { name: 'Fireball',  cost: 2, dmg: 35, type: 'attack',  color: '#ff4422', icon: '🔥',  desc: 'Heavy fire damage' },
-  { name: 'Heal',      cost: 2, dmg: -25,type: 'heal',    color: '#44dd66', icon: '💚',  desc: 'Restore 25 HP' },
-  { name: 'Shield',    cost: 1, dmg: 0,  type: 'shield',  color: '#4488ff', icon: '🛡️',  desc: 'Block 15 damage' },
-  { name: 'Venom',     cost: 2, dmg: 15, type: 'poison',  color: '#aa44ff', icon: '☠️',  desc: '15 dmg + 8 poison/turn' },
-  { name: 'Bite',      cost: 1, dmg: 12, type: 'attack',  color: '#ffaa22', icon: '🦷',  desc: 'Quick bite' },
-  { name: 'Drain',     cost: 3, dmg: 30, type: 'drain',   color: '#ff44aa', icon: '🩸',  desc: 'Deal 30, heal 15' },
-  { name: 'Rage',      cost: 0, dmg: 0,  type: 'buff',    color: '#ff8800', icon: '💢',  desc: '+50% dmg next attack' },
-];
-
-function createFighter(name, hp, isPlayer) {
-  return {
-    name, hp, maxHp: hp, shield: 0, poison: 0, rage: false,
-    x: isPlayer ? 180 : 720, y: 320,
-    baseX: isPlayer ? 180 : 720, baseY: 320,
-    scale: 3.0, frame: 0, frameTimer: 0, animSpeed: 120,
-    isPlayer, shakeX: 0, shakeY: 0, flash: 0, flashColor: '#fff',
-    hitAnim: 0,
-  };
+const tweens = [];
+function tweenTo(target, props, duration, ease = easeOutQuad, onComplete) {
+  const tw = { target, props: {}, duration, elapsed: 0, ease, onComplete, done: false };
+  for (const [k, v] of Object.entries(props)) {
+    tw.props[k] = { from: target[k], to: v };
+  }
+  tweens.push(tw);
+  return tw;
+}
+function updateTweens(dt) {
+  for (let i = tweens.length - 1; i >= 0; i--) {
+    const tw = tweens[i];
+    tw.elapsed = Math.min(tw.elapsed + dt, tw.duration);
+    const t = tw.ease(tw.elapsed / tw.duration);
+    for (const [k, { from, to }] of Object.entries(tw.props)) {
+      tw.target[k] = from + (to - from) * t;
+    }
+    if (tw.elapsed >= tw.duration) {
+      tw.done = true;
+      tweens.splice(i, 1);
+      tw.onComplete?.();
+    }
+  }
+}
+function killTweensOf(target) {
+  for (let i = tweens.length - 1; i >= 0; i--) {
+    if (tweens[i].target === target) tweens.splice(i, 1);
+  }
 }
 
-let player, enemy, energy, hand, deck, discardPile;
-let particles = [];
-let floatingTexts = [];
-let animations = [];
-let selectedCard = -1;
-let hoveredCard = -1;
-let endTurnHovered = false;
+// ============================================================
+//  SCREEN SHAKE (from PixiJS Games earthquake pattern)
+// ============================================================
+const camera = { offsetX: 0, offsetY: 0, shakePower: 0, shakeDuration: 0, shakeElapsed: 0 };
+function screenShake(power = 8, duration = 400) {
+  camera.shakePower = power;
+  camera.shakeDuration = duration;
+  camera.shakeElapsed = 0;
+}
+function updateShake(dt) {
+  if (camera.shakeElapsed < camera.shakeDuration) {
+    camera.shakeElapsed += dt;
+    const t = camera.shakeElapsed / camera.shakeDuration;
+    const p = camera.shakePower * (1 - t);
+    camera.offsetX = (Math.random() * 2 - 1) * p;
+    camera.offsetY = (Math.random() * 2 - 1) * p;
+  } else {
+    camera.offsetX = 0;
+    camera.offsetY = 0;
+  }
+}
 
-// ---- Particle system ----
-class Particle {
-  constructor(x, y, vx, vy, color, life, size, type = 'circle') {
-    Object.assign(this, { x, y, vx, vy, color, life, maxLife: life, size, type, alpha: 1, rotation: Math.random() * Math.PI * 2 });
+// ============================================================
+//  PARTICLE SYSTEM with Object Pooling (from PixiJS patterns)
+// ============================================================
+const particlePool = [];
+const activeParticles = [];
+
+function getParticle() {
+  return particlePool.pop() || { x: 0, y: 0, vx: 0, vy: 0, color: '#fff', life: 0, maxLife: 0, size: 0, type: 'circle', alpha: 1, rotation: 0 };
+}
+function releaseParticle(p) { particlePool.push(p); }
+
+function spawnParticles(x, y, count, color, type = 'circle', spread = 5) {
+  for (let i = 0; i < count; i++) {
+    const p = getParticle();
+    p.x = x + (Math.random() - 0.5) * 30;
+    p.y = y + (Math.random() - 0.5) * 30;
+    p.vx = (Math.random() - 0.5) * spread;
+    p.vy = (Math.random() - 1) * spread;
+    p.color = color;
+    p.life = 500 + Math.random() * 500;
+    p.maxLife = p.life;
+    p.size = 3 + Math.random() * 5;
+    p.type = type;
+    p.alpha = 1;
+    p.rotation = Math.random() * Math.PI * 2;
+    activeParticles.push(p);
   }
-  update(dt) {
-    this.x += this.vx * dt / 16;
-    this.y += this.vy * dt / 16;
-    this.vy += 0.1 * dt / 16; // gravity
-    this.life -= dt;
-    this.alpha = Math.max(0, this.life / this.maxLife);
-    return this.life > 0;
+}
+
+function updateParticles(dt) {
+  for (let i = activeParticles.length - 1; i >= 0; i--) {
+    const p = activeParticles[i];
+    p.x += p.vx * dt / 16;
+    p.y += p.vy * dt / 16;
+    p.vy += 0.1 * dt / 16;
+    p.life -= dt;
+    p.alpha = Math.max(0, p.life / p.maxLife);
+    if (p.life <= 0) {
+      activeParticles.splice(i, 1);
+      releaseParticle(p);
+    }
   }
-  draw() {
+}
+
+function drawParticles() {
+  for (const p of activeParticles) {
     ctx.save();
-    ctx.globalAlpha = this.alpha;
-    ctx.fillStyle = this.color;
-    if (this.type === 'circle') {
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = p.color;
+    if (p.type === 'circle') {
       ctx.beginPath();
-      ctx.arc(this.x, this.y, this.size * this.alpha, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.size * p.alpha, 0, Math.PI * 2);
       ctx.fill();
-    } else if (this.type === 'star') {
-      ctx.translate(this.x, this.y);
-      ctx.rotate(this.rotation + this.life * 0.01);
-      drawStar(0, 0, this.size * this.alpha, this.size * 0.4 * this.alpha, 5);
+    } else if (p.type === 'star') {
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation + p.life * 0.01);
+      drawStar(0, 0, p.size * p.alpha, p.size * 0.4 * p.alpha, 5);
       ctx.fill();
-    } else if (this.type === 'spark') {
-      ctx.strokeStyle = this.color;
+    } else if (p.type === 'spark') {
+      ctx.strokeStyle = p.color;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(this.x, this.y);
-      ctx.lineTo(this.x - this.vx * 3, this.y - this.vy * 3);
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - p.vx * 3, p.y - p.vy * 3);
       ctx.stroke();
     }
     ctx.restore();
@@ -155,38 +216,229 @@ function drawStar(cx, cy, outerR, innerR, points) {
   ctx.closePath();
 }
 
-function spawnParticles(x, y, count, color, type = 'circle', spread = 5) {
-  for (let i = 0; i < count; i++) {
-    particles.push(new Particle(
-      x + (Math.random() - 0.5) * 30,
-      y + (Math.random() - 0.5) * 30,
-      (Math.random() - 0.5) * spread,
-      (Math.random() - 1) * spread,
-      color,
-      500 + Math.random() * 500,
-      3 + Math.random() * 5,
-      type
-    ));
-  }
-}
+// ============================================================
+//  FLOATING TEXT SYSTEM with pooling (from PixiJS PointToaster)
+// ============================================================
+const floatingTexts = [];
 
-function spawnDamageText(x, y, text, color) {
+function spawnDamageText(x, y, text, color, scale = 1.5) {
   floatingTexts.push({
-    x: x + (Math.random() - 0.5) * 40,
-    y, text, color,
-    vy: -2.5, life: 1200, maxLife: 1200, scale: 1.5
+    x: x + (Math.random() - 0.5) * 40, y, text, color,
+    vy: -2.5, life: 1200, maxLife: 1200, scale,
+    phase: 'rise', elapsed: 0
   });
 }
 
-// ---- Deck management ----
+function updateFloatingTexts(dt) {
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    const ft = floatingTexts[i];
+    ft.y += ft.vy * dt / 16;
+    ft.vy *= 0.98;
+    ft.life -= dt;
+    if (ft.life <= 0) floatingTexts.splice(i, 1);
+  }
+}
+
+function drawFloatingTexts() {
+  for (const ft of floatingTexts) {
+    const alpha = Math.max(0, ft.life / ft.maxLife);
+    const popScale = ft.scale * (0.8 + 0.2 * Math.min(1, (ft.maxLife - ft.life) / 200));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `bold ${Math.round(18 * popScale)}px "Segoe UI", Arial`;
+    ctx.textAlign = 'center';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText(ft.text, ft.x, ft.y);
+    ctx.fillStyle = ft.color;
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+//  POWER / BUFF-DEBUFF SYSTEM (from Slay the Web + Ancient Beast)
+//  Composable effects with stack decay
+// ============================================================
+// Powers are stacks on a fighter. Each turn, stacks decrease by 1.
+// Effects modify the damage pipeline.
+const POWER_DEFS = {
+  strength:   { name: 'STR',   color: '#ff6644', icon: '💪', desc: '+N flat damage' },
+  weak:       { name: 'WEAK',  color: '#8866aa', icon: '😩', desc: 'Deal 75% damage' },
+  vulnerable: { name: 'VULN',  color: '#ff4488', icon: '💔', desc: 'Take 150% damage' },
+  poison:     { name: 'PSN',   color: '#aa44ff', icon: '☠️',  desc: 'N dmg/turn, -1/turn' },
+  toxic:      { name: 'TOX',   color: '#66ff44', icon: '🧪', desc: 'Escalating poison' },
+  burn:       { name: 'BURN',  color: '#ff8822', icon: '🔥', desc: 'N dmg/turn + ATK-25%' },
+  regen:      { name: 'REGEN', color: '#44dd66', icon: '💚', desc: 'Heal N/turn' },
+  thorns:     { name: 'THRN',  color: '#886644', icon: '🌿', desc: 'Reflect N dmg on hit' },
+};
+
+// ============================================================
+//  DAMAGE PIPELINE (from Slay the Web + Pokemon Showdown)
+//  base → strength → weak → crit → type effectiveness → vulnerable → block → HP
+// ============================================================
+const TYPE_CHART = {
+  fire:   { fire: 0.5, water: 0.5, grass: 2.0, neutral: 1.0 },
+  water:  { fire: 2.0, water: 0.5, grass: 0.5, neutral: 1.0 },
+  grass:  { fire: 0.5, water: 2.0, grass: 0.5, neutral: 1.0 },
+  neutral:{ fire: 1.0, water: 1.0, grass: 1.0, neutral: 1.0 },
+};
+
+function calcDamage(baseDmg, attacker, defender, cardElement = 'neutral') {
+  let dmg = baseDmg;
+
+  // Strength buff: +N flat damage (from Slay the Web)
+  dmg += (attacker.powers.strength || 0);
+
+  // Weak debuff on attacker: deal 75% (from Slay the Web)
+  if (attacker.powers.weak > 0) dmg = Math.floor(dmg * 0.75);
+
+  // Burn debuff on attacker: deal 75% (from Pokemon Showdown)
+  if (attacker.powers.burn > 0) dmg = Math.floor(dmg * 0.75);
+
+  // Critical hit (from Pokemon Showdown tier system)
+  let isCrit = false;
+  const critRoll = Math.random();
+  if (critRoll < 0.04) { // ~4% base crit chance
+    isCrit = true;
+    dmg = Math.floor(dmg * 1.5);
+  }
+
+  // Type effectiveness (from Pokemon Showdown)
+  const atkType = cardElement;
+  const defType = defender.element || 'neutral';
+  const effectiveness = (TYPE_CHART[atkType] && TYPE_CHART[atkType][defType]) || 1.0;
+  dmg = Math.floor(dmg * effectiveness);
+
+  // Random roll 85-100% (from Pokemon Showdown)
+  const roll = 0.85 + Math.random() * 0.15;
+  dmg = Math.floor(dmg * roll);
+
+  // Vulnerable on defender: take 150% (from Slay the Web)
+  if (defender.powers.vulnerable > 0) dmg = Math.floor(dmg * 1.5);
+
+  // Minimum 1 damage (from Ancient Beast)
+  dmg = Math.max(1, dmg);
+
+  return { dmg, isCrit, effectiveness };
+}
+
+function applyDamage(target, rawDmg, color = '#ff4444', isCrit = false, effectiveness = 1.0) {
+  let dmg = rawDmg;
+
+  // Block absorb (from Slay the Web)
+  if (target.block > 0) {
+    const blocked = Math.min(target.block, dmg);
+    target.block -= blocked;
+    dmg -= blocked;
+    if (blocked > 0) {
+      spawnDamageText(target.x, target.y - 100, `${blocked} BLOCKED`, '#4488ff');
+      spawnParticles(target.x, target.y, 6, '#4488ff', 'star');
+    }
+  }
+
+  // Thorns reflect (from Slay the Web)
+  // (handled externally after attack resolves)
+
+  if (dmg > 0) {
+    target.hp = Math.max(0, target.hp - dmg);
+    target.flash = 250;
+    target.flashColor = color;
+
+    // Squash/stretch on hit (from PixiJS patterns)
+    killTweensOf(target);
+    target.scaleX = 1.3;
+    target.scaleY = 0.7;
+    tweenTo(target, { scaleX: 1, scaleY: 1 }, 600, easeOutElastic);
+
+    // Screen shake proportional to damage (from PixiJS patterns)
+    screenShake(Math.min(3 + dmg * 0.3, 15), 300);
+  }
+
+  // Effect text
+  let label = `-${rawDmg}`;
+  if (isCrit) label = `CRIT! -${rawDmg}`;
+  if (effectiveness > 1) label += ' (SE!)';
+  else if (effectiveness < 1) label += ' (NVE)';
+
+  const textColor = isCrit ? '#ffff00' : effectiveness > 1 ? '#ff4444' : effectiveness < 1 ? '#8888aa' : color;
+  spawnDamageText(target.x, target.y - 70, label, textColor, isCrit ? 2.0 : 1.5);
+
+  if (isCrit) {
+    spawnParticles(target.x, target.y, 25, '#ffff00', 'star', 10);
+    screenShake(15, 400);
+  }
+
+  return dmg;
+}
+
+// ============================================================
+//  CARD DEFINITIONS (from Slay the Web schema)
+//  Each card: name, type, cost, baseDmg, element, powers, exhaust, desc
+// ============================================================
+const CARD_DEFS = [
+  // --- Attacks ---
+  { name: 'Slash',      type: 'attack', cost: 1, baseDmg: 9,  element: 'neutral', powers: {},                  exhaust: false, color: '#ff6644', icon: '⚔️',  desc: 'Deal 9 damage' },
+  { name: 'Fireball',   type: 'attack', cost: 2, baseDmg: 16, element: 'fire',    powers: {},                  exhaust: false, color: '#ff4422', icon: '🔥', desc: '16 fire damage' },
+  { name: 'Aqua Jet',   type: 'attack', cost: 2, baseDmg: 14, element: 'water',   powers: { weak: 1 },        exhaust: false, color: '#4488ff', icon: '💧', desc: '14 water dmg, apply 1 Weak' },
+  { name: 'Vine Whip',  type: 'attack', cost: 1, baseDmg: 7,  element: 'grass',   powers: {},                  exhaust: false, color: '#44bb44', icon: '🌿', desc: '7 grass dmg, draw 1' , actions: ['draw1'] },
+  { name: 'Bite',       type: 'attack', cost: 1, baseDmg: 6,  element: 'neutral', powers: {},                  exhaust: false, color: '#ffaa22', icon: '🦷', desc: '6 damage x2 hits', multi: 2 },
+  { name: 'Heavy Slam', type: 'attack', cost: 2, baseDmg: 22, element: 'neutral', powers: { vulnerable: 1 },  exhaust: false, color: '#cc6644', icon: '💥', desc: '22 dmg, apply 1 Vuln' },
+  { name: 'Inferno',    type: 'attack', cost: 3, baseDmg: 28, element: 'fire',    powers: { burn: 2 },        exhaust: false, color: '#ff2200', icon: '🌋', desc: '28 fire dmg + 2 Burn' },
+  { name: 'Soul Drain', type: 'attack', cost: 3, baseDmg: 20, element: 'neutral', powers: {},                  exhaust: false, color: '#ff44aa', icon: '🩸', desc: '20 dmg, heal 50%',  actions: ['drainHeal'] },
+
+  // --- Skills ---
+  { name: 'Heal',       type: 'skill',  cost: 1, heal: 12, powers: {},                  exhaust: false, color: '#44dd66', icon: '💚', desc: 'Heal 12 HP' },
+  { name: 'Shield Up',  type: 'skill',  cost: 1, block: 8, powers: {},                  exhaust: false, color: '#4488ff', icon: '🛡️',  desc: 'Gain 8 Block' },
+  { name: 'Toxic Spit', type: 'skill',  cost: 2, powers: { poison: 6 }, target: 'enemy', exhaust: false, color: '#aa44ff', icon: '☠️',  desc: 'Apply 6 Poison' },
+  { name: 'Fortify',    type: 'skill',  cost: 1, block: 14,powers: {},                  exhaust: false, color: '#6688cc', icon: '🏰', desc: 'Gain 14 Block' },
+
+  // --- Powers (persistent buffs) ---
+  { name: 'Rage',       type: 'power',  cost: 1, powers: { strength: 2 }, selfPowers: true, exhaust: false, color: '#ff8800', icon: '💢', desc: 'Gain 2 Strength' },
+  { name: 'Regen',      type: 'power',  cost: 1, powers: { regen: 3 },   selfPowers: true, exhaust: false, color: '#44ff88', icon: '🌱', desc: 'Gain 3 Regen' },
+  { name: 'Thorns',     type: 'power',  cost: 1, powers: { thorns: 3 },  selfPowers: true, exhaust: false, color: '#886644', icon: '🌵', desc: 'Gain 3 Thorns' },
+
+  // --- Exhaust (one-time powerful, from Slay the Web) ---
+  { name: 'Adrenaline', type: 'skill',  cost: 0, powers: {}, exhaust: true, color: '#ffcc00', icon: '⚡', desc: 'Draw 2, gain 1 energy', actions: ['draw2', 'energy1'] },
+  { name: 'Execute',    type: 'attack', cost: 2, baseDmg: 40, element: 'neutral', powers: {}, exhaust: true, color: '#dd0000', icon: '🗡️',  desc: '40 damage. Exhaust.', conditions: ['targetBelow50'] },
+];
+
+// ============================================================
+//  FIGHTER / CREATURE (from Ancient Beast baseStats pattern)
+// ============================================================
+function createFighter(name, hp, element, isPlayer, imgKey) {
+  return {
+    name, element, imgKey,
+    hp, maxHp: hp, block: 0,
+    powers: {}, // { strength: 2, poison: 3, etc. }
+    toxicStage: 0, // escalating toxic counter (from Pokemon Showdown)
+    isPlayer,
+    x: isPlayer ? 180 : 720, y: 330,
+    baseX: isPlayer ? 180 : 720, baseY: 330,
+    scale: 3.2, scaleX: 1, scaleY: 1,
+    frame: 0, frameTimer: 0, animSpeed: 120,
+    flash: 0, flashColor: '#fff',
+  };
+}
+
+// ============================================================
+//  DECK SYSTEM (from Slay the Web 5-pile system)
+// ============================================================
+let drawPile = [], hand = [], discardPile = [], exhaustPile = [];
+
 function buildDeck() {
-  deck = [];
-  for (let i = 0; i < 3; i++) {
-    for (const card of CARDS) {
-      deck.push({ ...card });
+  const deck = [];
+  // Build deck: 2 copies of each card
+  for (const def of CARD_DEFS) {
+    for (let i = 0; i < 2; i++) {
+      deck.push({ ...def, id: Math.random().toString(36).substr(2, 9) });
     }
   }
   shuffleArray(deck);
+  drawPile = deck;
+  hand = [];
+  discardPile = [];
+  exhaustPile = [];
 }
 
 function shuffleArray(arr) {
@@ -198,395 +450,489 @@ function shuffleArray(arr) {
 
 function drawCards(count) {
   for (let i = 0; i < count; i++) {
-    if (deck.length === 0) {
-      deck = [...discardPile];
+    if (drawPile.length === 0) {
+      drawPile = [...discardPile];
       discardPile = [];
-      shuffleArray(deck);
+      shuffleArray(drawPile);
     }
-    if (deck.length > 0 && hand.length < 8) {
-      hand.push(deck.pop());
+    if (drawPile.length > 0 && hand.length < 10) {
+      hand.push(drawPile.pop());
     }
   }
 }
 
-// ---- Init ----
+// ============================================================
+//  ENEMY INTENT SYSTEM (from Slay the Web monster pattern)
+//  Show what the enemy will do next turn
+// ============================================================
+const ENEMY_INTENTS = [
+  { name: 'Claw',       type: 'attack', dmg: 11, icon: '⚔️', color: '#ff6644' },
+  { name: 'Venom Spit', type: 'poison', dmg: 8,  poisonAmt: 5, icon: '☠️', color: '#aa44ff' },
+  { name: 'Toxic Heal', type: 'heal',   heal: 15, icon: '💚', color: '#44dd66' },
+  { name: 'Shell',      type: 'block',  block: 12, icon: '🛡️', color: '#4488ff' },
+  { name: 'Heavy Slam', type: 'attack', dmg: 18, icon: '💥', color: '#ff4422', vuln: 1 },
+  { name: 'Acid Spray',  type: 'debuff', weak: 2, icon: '😩', color: '#8866aa' },
+  { name: 'Leech Bite', type: 'drain',  dmg: 12, healAmt: 6, icon: '🩸', color: '#ff44aa' },
+];
+let currentIntent = null;
+let nextIntent = null;
+
+function rollIntent() {
+  const hpPct = enemy.hp / enemy.maxHp;
+  let weights;
+  if (hpPct < 0.3) {
+    weights = [1, 1, 4, 2, 0, 1, 2]; // favor healing
+  } else if (hpPct < 0.6) {
+    weights = [2, 2, 1, 2, 2, 1, 1]; // balanced
+  } else {
+    weights = [3, 2, 0, 1, 2, 2, 1]; // aggressive
+  }
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < weights.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return { ...ENEMY_INTENTS[i] };
+  }
+  return { ...ENEMY_INTENTS[0] };
+}
+
+// ============================================================
+//  GAME STATE
+// ============================================================
+const ENERGY_MAX = 3;
+let gameState = 'loading';
+let turnNumber = 0;
+let player, enemy, energy;
+let selectedCard = -1, hoveredCard = -1;
+let endTurnHovered = false, restartHovered = false;
+let actionQueue = []; // sequential action queue
+
 function init() {
-  player = createFighter('Ember Frog', 120, true);
-  enemy = createFighter('Toxic Frog', 100, false);
+  player = createFighter('Ember Frog', 80, 'fire', true, 'player');
+  enemy = createFighter('Toxic Frog', 72, 'grass', false, 'enemy');
   energy = ENERGY_MAX;
-  hand = [];
-  discardPile = [];
-  particles = [];
-  floatingTexts = [];
-  animations = [];
   selectedCard = -1;
   turnNumber = 0;
   currentBg = Math.floor(Math.random() * 6);
+  floatingTexts.length = 0;
+  activeParticles.length = 0;
+  tweens.length = 0;
+  actionQueue = [];
   buildDeck();
+  nextIntent = rollIntent();
   startPlayerTurn();
   gameState = 'playerTurn';
+  lastTime = 0;
   requestAnimationFrame(gameLoop);
 }
 
+// ============================================================
+//  TURN LIFECYCLE (from Slay the Web + Pokemon Showdown)
+// ============================================================
 function startPlayerTurn() {
   turnNumber++;
   energy = ENERGY_MAX;
-  drawCards(4);
-  // apply poison
-  if (player.poison > 0) {
-    applyDamage(player, player.poison, '#aa44ff');
-    spawnParticles(player.x, player.y, 8, '#aa44ff', 'circle');
-    spawnDamageText(player.x, player.y - 60, `${player.poison} PSN`, '#cc66ff');
-    player.poison = Math.max(0, player.poison - 2);
+  player.block = 0; // block resets each turn (from Slay the Web)
+  drawCards(5);
+
+  // Process player start-of-turn effects
+  processStartOfTurn(player);
+}
+
+function processStartOfTurn(fighter) {
+  // Poison: flat DoT, decreases by 1 each turn (from Slay the Web)
+  if (fighter.powers.poison > 0) {
+    const poisonDmg = fighter.powers.poison;
+    fighter.hp = Math.max(0, fighter.hp - poisonDmg);
+    fighter.flash = 200; fighter.flashColor = '#aa44ff';
+    spawnDamageText(fighter.x, fighter.y - 70, `${poisonDmg} POISON`, '#cc66ff');
+    spawnParticles(fighter.x, fighter.y, 10, '#aa44ff', 'circle');
+    fighter.powers.poison--;
+    if (fighter.powers.poison <= 0) delete fighter.powers.poison;
+    screenShake(4, 200);
+  }
+
+  // Toxic: escalating DoT (from Pokemon Showdown)
+  if (fighter.powers.toxic > 0) {
+    fighter.toxicStage = Math.min(15, (fighter.toxicStage || 0) + 1);
+    const toxDmg = Math.max(1, Math.floor(fighter.maxHp / 16) * fighter.toxicStage);
+    fighter.hp = Math.max(0, fighter.hp - toxDmg);
+    fighter.flash = 200; fighter.flashColor = '#66ff44';
+    spawnDamageText(fighter.x, fighter.y - 70, `${toxDmg} TOXIC`, '#66ff44');
+    spawnParticles(fighter.x, fighter.y, 12, '#66ff44', 'circle');
+    screenShake(5, 200);
+  }
+
+  // Burn: DoT + already handled in damage calc (from Pokemon Showdown)
+  if (fighter.powers.burn > 0) {
+    const burnDmg = Math.max(1, Math.floor(fighter.maxHp / 16));
+    fighter.hp = Math.max(0, fighter.hp - burnDmg);
+    fighter.flash = 200; fighter.flashColor = '#ff8822';
+    spawnDamageText(fighter.x, fighter.y - 90, `${burnDmg} BURN`, '#ff8822');
+    spawnParticles(fighter.x, fighter.y, 8, '#ff8822', 'circle');
+    fighter.powers.burn--;
+    if (fighter.powers.burn <= 0) delete fighter.powers.burn;
+  }
+
+  // Regen: heal per turn (from Slay the Web)
+  if (fighter.powers.regen > 0) {
+    const healAmt = fighter.powers.regen;
+    fighter.hp = Math.min(fighter.maxHp, fighter.hp + healAmt);
+    spawnDamageText(fighter.x, fighter.y - 70, `+${healAmt} REGEN`, '#44dd66');
+    spawnParticles(fighter.x, fighter.y, 6, '#44ff66', 'circle', 3);
+    fighter.powers.regen--;
+    if (fighter.powers.regen <= 0) delete fighter.powers.regen;
+  }
+
+  // Check death
+  if (fighter.hp <= 0) {
+    setTimeout(() => { gameState = fighter.isPlayer ? 'lose' : 'win'; }, 600);
   }
 }
 
-function applyDamage(target, dmg, color = '#ff4444') {
-  if (target.shield > 0) {
-    const blocked = Math.min(target.shield, dmg);
-    target.shield -= blocked;
-    dmg -= blocked;
-    if (blocked > 0) {
-      spawnDamageText(target.x, target.y - 80, `${blocked} BLOCKED`, '#4488ff');
-      spawnParticles(target.x, target.y, 6, '#4488ff', 'star');
+function decayPowers(fighter) {
+  // Decay non-persistent powers by 1 each turn (from Slay the Web)
+  for (const key of ['weak', 'vulnerable']) {
+    if (fighter.powers[key] > 0) {
+      fighter.powers[key]--;
+      if (fighter.powers[key] <= 0) delete fighter.powers[key];
     }
   }
-  if (dmg > 0) {
-    target.hp = Math.max(0, target.hp - dmg);
-    target.flash = 200;
-    target.flashColor = color;
-    target.shakeX = 10;
-    target.hitAnim = 300;
-  }
 }
 
+// ============================================================
+//  CARD CONDITIONS (from Slay the Web)
+// ============================================================
+function canPlayCard(card) {
+  if (card.cost > energy) return false;
+  if (card.conditions) {
+    for (const cond of card.conditions) {
+      if (cond === 'targetBelow50' && enemy.hp > enemy.maxHp * 0.5) return false;
+    }
+  }
+  return true;
+}
+
+// ============================================================
+//  PLAY CARD (from Slay the Web pipeline)
+// ============================================================
 function playCard(cardIndex) {
   if (gameState !== 'playerTurn') return;
   const card = hand[cardIndex];
-  if (!card || card.cost > energy) return;
+  if (!card || !canPlayCard(card)) return;
 
   energy -= card.cost;
   hand.splice(cardIndex, 1);
   selectedCard = -1;
-  let dmg = card.dmg;
 
-  if (player.rage && card.type === 'attack') {
-    dmg = Math.floor(dmg * 1.5);
-    player.rage = false;
-    spawnDamageText(player.x, player.y - 90, 'RAGE!', '#ff8800');
+  // Discard or exhaust (from Slay the Web)
+  if (card.exhaust) {
+    exhaustPile.push(card);
+    spawnDamageText(player.x, player.y - 40, 'EXHAUST', '#888');
+  } else {
+    discardPile.push(card);
   }
 
-  // Attack animation
   gameState = 'animating';
-  const origX = player.x;
+
+  // Process card actions
+  if (card.actions) {
+    for (const action of card.actions) {
+      if (action === 'draw1') drawCards(1);
+      if (action === 'draw2') drawCards(2);
+      if (action === 'energy1') energy = Math.min(energy + 1, ENERGY_MAX + 2);
+    }
+  }
 
   switch (card.type) {
-    case 'attack':
-      animateAttack(player, enemy, () => {
-        applyDamage(enemy, dmg);
-        spawnDamageText(enemy.x, enemy.y - 60, `-${dmg}`, '#ff4444');
-        spawnParticles(enemy.x, enemy.y, 15, card.color, 'spark', 8);
-        spawnParticles(enemy.x, enemy.y, 10, '#ffaa00', 'star');
-        discardPile.push(card);
-        checkWinLose();
-      });
-      break;
-    case 'heal':
-      player.hp = Math.min(player.maxHp, player.hp + Math.abs(card.dmg));
-      spawnDamageText(player.x, player.y - 60, `+${Math.abs(card.dmg)}`, '#44dd66');
-      spawnParticles(player.x, player.y, 20, '#44ff66', 'circle', 4);
-      spawnParticles(player.x, player.y, 10, '#88ffaa', 'star', 3);
-      discardPile.push(card);
-      setTimeout(() => { gameState = 'playerTurn'; }, 400);
-      break;
-    case 'shield':
-      player.shield += 15;
-      spawnDamageText(player.x, player.y - 60, '+15 🛡️', '#4488ff');
-      spawnParticles(player.x, player.y, 15, '#4488ff', 'star', 3);
-      discardPile.push(card);
-      setTimeout(() => { gameState = 'playerTurn'; }, 400);
-      break;
-    case 'poison':
-      animateAttack(player, enemy, () => {
-        applyDamage(enemy, dmg);
-        enemy.poison += 8;
-        spawnDamageText(enemy.x, enemy.y - 60, `-${dmg}`, '#aa44ff');
-        spawnDamageText(enemy.x, enemy.y - 90, '+8 PSN', '#cc66ff');
-        spawnParticles(enemy.x, enemy.y, 20, '#aa44ff', 'circle', 6);
-        spawnParticles(enemy.x, enemy.y, 8, '#66ff44', 'circle', 4);
-        discardPile.push(card);
-        checkWinLose();
-      });
-      break;
-    case 'drain':
-      animateAttack(player, enemy, () => {
-        applyDamage(enemy, dmg);
-        player.hp = Math.min(player.maxHp, player.hp + 15);
-        spawnDamageText(enemy.x, enemy.y - 60, `-${dmg}`, '#ff44aa');
-        spawnDamageText(player.x, player.y - 60, `+15`, '#44dd66');
-        spawnParticles(enemy.x, enemy.y, 12, '#ff44aa', 'spark', 6);
-        spawnParticles(player.x, player.y, 10, '#44ff66', 'circle', 3);
-        discardPile.push(card);
-        checkWinLose();
-      });
-      break;
-    case 'buff':
-      player.rage = true;
-      spawnDamageText(player.x, player.y - 60, 'RAGE! +50%', '#ff8800');
-      spawnParticles(player.x, player.y, 20, '#ff8800', 'star', 5);
-      spawnParticles(player.x, player.y, 10, '#ffcc00', 'circle', 3);
-      discardPile.push(card);
-      setTimeout(() => { gameState = 'playerTurn'; }, 400);
-      break;
-  }
-}
-
-function animateAttack(attacker, target, onHit) {
-  const startX = attacker.x;
-  const targetX = target.x + (attacker.isPlayer ? -80 : 80);
-  const dur = 300;
-  const start = performance.now();
-
-  function step(now) {
-    const t = Math.min(1, (now - start) / dur);
-    const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    attacker.x = startX + (targetX - startX) * ease;
-
-    if (t >= 1) {
-      onHit();
-      // return animation
-      const retStart = performance.now();
-      function retStep(now2) {
-        const t2 = Math.min(1, (now2 - retStart) / 200);
-        attacker.x = targetX + (startX - targetX) * t2;
-        if (t2 >= 1) {
-          attacker.x = startX;
-          setTimeout(() => {
-            if (gameState === 'animating') gameState = 'playerTurn';
-          }, 100);
-          return;
+    case 'attack': {
+      const hits = card.multi || 1;
+      doAttackSequence(player, enemy, card, hits, 0, () => {
+        // Thorns reflect (from Slay the Web)
+        if (enemy.powers.thorns > 0) {
+          const thornsDmg = enemy.powers.thorns;
+          player.hp = Math.max(0, player.hp - thornsDmg);
+          spawnDamageText(player.x, player.y - 70, `${thornsDmg} THORNS`, '#886644');
+          spawnParticles(player.x, player.y, 6, '#886644', 'circle');
         }
-        requestAnimationFrame(retStep);
-      }
-      requestAnimationFrame(retStep);
-      return;
-    }
-    requestAnimationFrame(step);
-  }
-  requestAnimationFrame(step);
-}
-
-function animateEnemyAttack(attacker, target, onHit, callback) {
-  const startX = attacker.x;
-  const targetX = target.x + (attacker.isPlayer ? -80 : 80);
-  const dur = 300;
-  const start = performance.now();
-
-  function step(now) {
-    const t = Math.min(1, (now - start) / dur);
-    const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    attacker.x = startX + (targetX - startX) * ease;
-
-    if (t >= 1) {
-      onHit();
-      const retStart = performance.now();
-      function retStep(now2) {
-        const t2 = Math.min(1, (now2 - retStart) / 200);
-        attacker.x = targetX + (startX - targetX) * t2;
-        if (t2 >= 1) {
-          attacker.x = startX;
-          setTimeout(callback, 200);
-          return;
+        // Apply powers to enemy
+        applyCardPowers(card, enemy);
+        // Drain heal action
+        if (card.actions && card.actions.includes('drainHeal')) {
+          const healAmt = Math.floor(card.baseDmg * 0.5);
+          player.hp = Math.min(player.maxHp, player.hp + healAmt);
+          spawnDamageText(player.x, player.y - 70, `+${healAmt}`, '#44dd66');
+          spawnParticles(player.x, player.y, 8, '#44ff66', 'circle', 3);
         }
-        requestAnimationFrame(retStep);
-      }
-      requestAnimationFrame(retStep);
-      return;
+        checkWinLose('playerTurn');
+      });
+      break;
     }
-    requestAnimationFrame(step);
+    case 'skill': {
+      if (card.heal) {
+        player.hp = Math.min(player.maxHp, player.hp + card.heal);
+        spawnDamageText(player.x, player.y - 70, `+${card.heal}`, '#44dd66');
+        spawnParticles(player.x, player.y, 15, '#44ff66', 'circle', 4);
+        spawnParticles(player.x, player.y, 8, '#88ffaa', 'star', 3);
+      }
+      if (card.block) {
+        player.block += card.block;
+        spawnDamageText(player.x, player.y - 70, `+${card.block} BLOCK`, '#4488ff');
+        spawnParticles(player.x, player.y, 12, '#4488ff', 'star', 3);
+      }
+      // Apply powers to enemy (e.g. Toxic Spit)
+      if (card.target === 'enemy') {
+        applyCardPowers(card, enemy);
+      } else {
+        applyCardPowers(card, player);
+      }
+      setTimeout(() => { if (gameState === 'animating') gameState = 'playerTurn'; }, 400);
+      break;
+    }
+    case 'power': {
+      // Self buffs (from Slay the Web power cards)
+      if (card.selfPowers) {
+        applyCardPowers(card, player);
+      } else {
+        applyCardPowers(card, enemy);
+      }
+      setTimeout(() => { if (gameState === 'animating') gameState = 'playerTurn'; }, 400);
+      break;
+    }
   }
-  requestAnimationFrame(step);
 }
 
-function checkWinLose() {
+function applyCardPowers(card, target) {
+  if (!card.powers) return;
+  for (const [key, val] of Object.entries(card.powers)) {
+    if (val <= 0) continue;
+    target.powers[key] = (target.powers[key] || 0) + val;
+    const def = POWER_DEFS[key];
+    if (def) {
+      spawnDamageText(target.x, target.y - 90, `+${val} ${def.name}`, def.color);
+      spawnParticles(target.x, target.y, 8, def.color, 'circle', 3);
+    }
+  }
+}
+
+function doAttackSequence(attacker, target, card, totalHits, currentHit, onComplete) {
+  if (currentHit >= totalHits) {
+    onComplete();
+    return;
+  }
+  doLungeAttack(attacker, target, () => {
+    const { dmg, isCrit, effectiveness } = calcDamage(card.baseDmg, attacker, target, card.element);
+    applyDamage(target, dmg, card.color, isCrit, effectiveness);
+    spawnParticles(target.x, target.y, 12, card.color, 'spark', 8);
+    if (isCrit) spawnParticles(target.x, target.y, 8, '#ffff00', 'star', 6);
+  }, () => {
+    setTimeout(() => doAttackSequence(attacker, target, card, totalHits, currentHit + 1, onComplete), 150);
+  });
+}
+
+function doLungeAttack(attacker, target, onHit, onReturn) {
+  const startX = attacker.baseX;
+  const targetX = target.x + (attacker.isPlayer ? -80 : 80);
+
+  // Anticipation: pull back slightly (from PixiJS squash/stretch)
+  tweenTo(attacker, { x: startX + (attacker.isPlayer ? -15 : 15) }, 80, easeInQuad, () => {
+    // Lunge forward
+    tweenTo(attacker, { x: targetX }, 200, easeInOutQuad, () => {
+      onHit();
+      // Return with bounce
+      tweenTo(attacker, { x: startX }, 250, easeOutBack, () => {
+        onReturn();
+      });
+    });
+  });
+}
+
+function checkWinLose(returnState = 'playerTurn') {
   if (enemy.hp <= 0) {
-    setTimeout(() => { gameState = 'win'; }, 800);
+    spawnParticles(enemy.x, enemy.y, 40, '#ff4444', 'star', 12);
+    spawnParticles(enemy.x, enemy.y, 30, '#ffaa00', 'spark', 10);
+    screenShake(20, 600);
+    setTimeout(() => { gameState = 'win'; }, 1000);
   } else if (player.hp <= 0) {
-    setTimeout(() => { gameState = 'lose'; }, 800);
+    spawnParticles(player.x, player.y, 40, '#ff4444', 'star', 12);
+    screenShake(20, 600);
+    setTimeout(() => { gameState = 'lose'; }, 1000);
+  } else {
+    setTimeout(() => { if (gameState === 'animating') gameState = returnState; }, 100);
   }
 }
 
+// ============================================================
+//  END TURN + ENEMY TURN (from Slay the Web)
+// ============================================================
 function endTurn() {
   if (gameState !== 'playerTurn') return;
-  // discard remaining hand
   discardPile.push(...hand);
   hand = [];
   selectedCard = -1;
+  decayPowers(player);
   gameState = 'enemyTurn';
-  setTimeout(enemyTurn, 600);
+  setTimeout(enemyTurn, 500);
 }
 
-// ---- Enemy AI ----
 function enemyTurn() {
-  // Apply poison to enemy
-  if (enemy.poison > 0) {
-    applyDamage(enemy, enemy.poison, '#aa44ff');
-    spawnParticles(enemy.x, enemy.y, 8, '#aa44ff', 'circle');
-    spawnDamageText(enemy.x, enemy.y - 60, `${enemy.poison} PSN`, '#cc66ff');
-    enemy.poison = Math.max(0, enemy.poison - 2);
-    if (enemy.hp <= 0) { checkWinLose(); return; }
-  }
+  enemy.block = 0; // reset enemy block
+  processStartOfTurn(enemy);
+  if (enemy.hp <= 0) return;
+  decayPowers(enemy);
 
-  // AI decides action
-  const hpPercent = enemy.hp / enemy.maxHp;
-  const actions = [];
-
-  if (hpPercent < 0.35) {
-    actions.push({ name: 'Heal', type: 'heal', dmg: 20 });
-  }
-  if (Math.random() > 0.6) {
-    actions.push({ name: 'Venom Spit', type: 'poison', dmg: 12, poisonAmt: 6 });
-  }
-  actions.push({ name: 'Claw', type: 'attack', dmg: 14 + Math.floor(Math.random() * 8) });
-  if (Math.random() > 0.7) {
-    actions.push({ name: 'Shield', type: 'shield', amt: 10 });
-  }
-
-  // Pick best action
-  let action;
-  if (hpPercent < 0.35 && actions.find(a => a.type === 'heal')) {
-    action = actions.find(a => a.type === 'heal');
-  } else {
-    action = actions[Math.floor(Math.random() * actions.length)];
-  }
-
+  // Execute current intent
+  currentIntent = nextIntent;
+  const intent = currentIntent;
   gameState = 'animating';
 
-  switch (action.type) {
-    case 'attack':
-      animateEnemyAttack(enemy, player, () => {
-        applyDamage(player, action.dmg);
-        spawnDamageText(player.x, player.y - 60, `-${action.dmg}`, '#ff4444');
-        spawnParticles(player.x, player.y, 15, '#ff6644', 'spark', 8);
-        checkWinLose();
-      }, () => {
-        if (gameState === 'animating') {
-          gameState = 'playerTurn';
-          startPlayerTurn();
+  switch (intent.type) {
+    case 'attack': {
+      doLungeAttack(enemy, player, () => {
+        // Random 85-100% roll on intent damage
+        const roll = 0.85 + Math.random() * 0.15;
+        let dmg = Math.floor(intent.dmg * roll);
+        if (enemy.powers.weak > 0) dmg = Math.floor(dmg * 0.75);
+        if (player.powers.vulnerable > 0) dmg = Math.floor(dmg * 1.5);
+        dmg = Math.max(1, dmg);
+        applyDamage(player, dmg, intent.color);
+        spawnParticles(player.x, player.y, 15, intent.color, 'spark', 8);
+        if (intent.vuln) {
+          player.powers.vulnerable = (player.powers.vulnerable || 0) + intent.vuln;
+          spawnDamageText(player.x, player.y - 100, `+${intent.vuln} VULN`, '#ff4488');
         }
+      }, () => {
+        finishEnemyTurn();
       });
       break;
-    case 'heal':
-      enemy.hp = Math.min(enemy.maxHp, enemy.hp + action.dmg);
-      spawnDamageText(enemy.x, enemy.y - 60, `+${action.dmg}`, '#44dd66');
-      spawnParticles(enemy.x, enemy.y, 15, '#44ff66', 'circle', 4);
-      setTimeout(() => {
-        if (gameState === 'animating') {
-          gameState = 'playerTurn';
-          startPlayerTurn();
-        }
-      }, 800);
-      break;
-    case 'poison':
-      animateEnemyAttack(enemy, player, () => {
-        applyDamage(player, action.dmg);
-        player.poison += action.poisonAmt;
-        spawnDamageText(player.x, player.y - 60, `-${action.dmg}`, '#aa44ff');
-        spawnDamageText(player.x, player.y - 90, `+${action.poisonAmt} PSN`, '#cc66ff');
+    }
+    case 'poison': {
+      doLungeAttack(enemy, player, () => {
+        const roll = 0.85 + Math.random() * 0.15;
+        let dmg = Math.max(1, Math.floor(intent.dmg * roll));
+        applyDamage(player, dmg, intent.color);
+        player.powers.poison = (player.powers.poison || 0) + intent.poisonAmt;
+        spawnDamageText(player.x, player.y - 100, `+${intent.poisonAmt} PSN`, '#cc66ff');
         spawnParticles(player.x, player.y, 15, '#aa44ff', 'circle', 6);
-        checkWinLose();
       }, () => {
-        if (gameState === 'animating') {
-          gameState = 'playerTurn';
-          startPlayerTurn();
-        }
+        finishEnemyTurn();
       });
       break;
-    case 'shield':
-      enemy.shield += action.amt;
-      spawnDamageText(enemy.x, enemy.y - 60, `+${action.amt} 🛡️`, '#4488ff');
-      spawnParticles(enemy.x, enemy.y, 12, '#4488ff', 'star', 3);
-      setTimeout(() => {
-        if (gameState === 'animating') {
-          gameState = 'playerTurn';
-          startPlayerTurn();
-        }
-      }, 800);
+    }
+    case 'heal': {
+      enemy.hp = Math.min(enemy.maxHp, enemy.hp + intent.heal);
+      spawnDamageText(enemy.x, enemy.y - 70, `+${intent.heal}`, '#44dd66');
+      spawnParticles(enemy.x, enemy.y, 15, '#44ff66', 'circle', 4);
+      setTimeout(finishEnemyTurn, 600);
       break;
+    }
+    case 'block': {
+      enemy.block += intent.block;
+      spawnDamageText(enemy.x, enemy.y - 70, `+${intent.block} BLOCK`, '#4488ff');
+      spawnParticles(enemy.x, enemy.y, 12, '#4488ff', 'star', 3);
+      setTimeout(finishEnemyTurn, 600);
+      break;
+    }
+    case 'debuff': {
+      if (intent.weak) {
+        player.powers.weak = (player.powers.weak || 0) + intent.weak;
+        spawnDamageText(player.x, player.y - 70, `+${intent.weak} WEAK`, '#8866aa');
+        spawnParticles(player.x, player.y, 10, '#8866aa', 'circle', 4);
+      }
+      setTimeout(finishEnemyTurn, 600);
+      break;
+    }
+    case 'drain': {
+      doLungeAttack(enemy, player, () => {
+        const roll = 0.85 + Math.random() * 0.15;
+        let dmg = Math.max(1, Math.floor(intent.dmg * roll));
+        applyDamage(player, dmg, intent.color);
+        enemy.hp = Math.min(enemy.maxHp, enemy.hp + intent.healAmt);
+        spawnDamageText(enemy.x, enemy.y - 70, `+${intent.healAmt}`, '#44dd66');
+      }, () => {
+        finishEnemyTurn();
+      });
+      break;
+    }
+    default:
+      setTimeout(finishEnemyTurn, 600);
   }
 }
 
-// ---- Drawing ----
+function finishEnemyTurn() {
+  if (player.hp <= 0) {
+    checkWinLose();
+    return;
+  }
+  nextIntent = rollIntent();
+  setTimeout(() => {
+    if (gameState === 'animating' || gameState === 'enemyTurn') {
+      gameState = 'playerTurn';
+      startPlayerTurn();
+    }
+  }, 400);
+}
+
+// ============================================================
+//  DRAWING
+// ============================================================
 function drawBackground() {
   const bg = images.backgrounds;
   if (bg && bg.complete) {
-    // Grid layout: 2 columns x 3 rows in the source image
     const col = currentBg % BG_COLS;
     const row = Math.floor(currentBg / BG_COLS);
-    ctx.drawImage(bg,
-      col * BG_W, row * BG_H, BG_W, BG_H,
-      0, 0, canvas.width, canvas.height
-    );
-    // Slight vignette overlay for UI readability
+    ctx.drawImage(bg, col * BG_W, row * BG_H, BG_W, BG_H, 0, 0, W, H);
     const vig = ctx.createRadialGradient(480, 320, 200, 480, 320, 520);
     vig.addColorStop(0, 'rgba(0,0,0,0)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.4)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.45)');
     ctx.fillStyle = vig;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, W, H);
   } else {
-    // Fallback gradient
-    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
     grad.addColorStop(0, '#1a1a3e');
-    grad.addColorStop(0.5, '#2d1b4e');
     grad.addColorStop(1, '#0d2137');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, W, H);
   }
-
-  // Map name label
   ctx.save();
-  ctx.font = '12px "Segoe UI", Arial';
+  ctx.font = '11px "Segoe UI", Arial';
   ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  ctx.fillText(BG_NAMES[currentBg] || '', canvas.width - 15, canvas.height - 8);
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.fillText(BG_NAMES[currentBg] || '', W - 12, H - 6);
   ctx.restore();
 }
 
-function drawSprite(fighter, imgKey) {
-  const img = images[imgKey];
+function drawSprite(fighter) {
+  const img = images[fighter.imgKey];
   if (!img) return;
-
   const fd = FRAME_DATA_6[fighter.frame];
   ctx.save();
-
-  const dx = fighter.x + fighter.shakeX;
-  const dy = fighter.y + fighter.shakeY;
+  const dx = fighter.x;
+  const dy = fighter.y;
 
   // Shadow
   ctx.globalAlpha = 0.3;
   ctx.fillStyle = '#000';
   ctx.beginPath();
-  ctx.ellipse(dx, dy + fd.h * fighter.scale / 2 + 10, 40, 12, 0, 0, Math.PI * 2);
+  ctx.ellipse(dx, dy + fd.h * fighter.scale / 2 + 10, 45 * fighter.scaleX, 12, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.globalAlpha = 1;
 
   ctx.translate(dx, dy);
 
   // Mirror enemy
-  if (!fighter.isPlayer) {
-    ctx.scale(-1, 1);
-  }
+  const flipX = fighter.isPlayer ? 1 : -1;
+  ctx.scale(flipX * fighter.scaleX, fighter.scaleY);
 
   // Hit flash
   if (fighter.flash > 0) {
-    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(fighter.flash * 0.05);
+    ctx.globalAlpha = 0.6 + 0.4 * Math.sin(fighter.flash * 0.06);
   }
 
-  // Draw bouncing idle
+  // Idle bounce (sine wave from PixiJS patterns)
   const bounce = Math.sin(performance.now() * 0.003 + (fighter.isPlayer ? 0 : Math.PI)) * 4;
 
-  ctx.drawImage(
-    img,
+  ctx.drawImage(img,
     fd.x, fd.y, fd.w, fd.h,
     -fd.w * fighter.scale / 2, -fd.h * fighter.scale / 2 + bounce,
     fd.w * fighter.scale, fd.h * fighter.scale
@@ -596,63 +942,63 @@ function drawSprite(fighter, imgKey) {
   if (fighter.flash > 0) {
     ctx.globalCompositeOperation = 'source-atop';
     ctx.fillStyle = fighter.flashColor;
-    ctx.globalAlpha = fighter.flash / 400;
+    ctx.globalAlpha = fighter.flash / 500;
     ctx.fillRect(-fd.w * fighter.scale / 2, -fd.h * fighter.scale / 2 + bounce,
       fd.w * fighter.scale, fd.h * fighter.scale);
   }
-
   ctx.restore();
 
-  // Shield aura
-  if (fighter.shield > 0) {
+  // Block aura
+  if (fighter.block > 0) {
     ctx.save();
     ctx.globalAlpha = 0.2 + 0.1 * Math.sin(performance.now() * 0.005);
     ctx.strokeStyle = '#44aaff';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.ellipse(dx, dy, 60, 50, 0, 0, Math.PI * 2);
+    ctx.ellipse(dx, dy, 65, 55, 0, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.globalAlpha = 0.08;
+    ctx.globalAlpha = 0.06;
     ctx.fillStyle = '#44aaff';
     ctx.fill();
     ctx.restore();
   }
 
-  // Poison indicator
-  if (fighter.poison > 0) {
-    ctx.save();
-    ctx.globalAlpha = 0.3;
-    for (let i = 0; i < 3; i++) {
-      const px = dx - 20 + i * 20;
-      const py = dy + 50 + Math.sin(performance.now() * 0.003 + i) * 5;
-      ctx.fillStyle = '#aa44ff';
-      ctx.beginPath();
-      ctx.arc(px, py, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
+  // Status effect indicators under sprite
+  drawStatusIcons(fighter, dx, dy + 65);
+}
 
-  // Rage indicator
-  if (fighter.rage) {
-    ctx.save();
-    ctx.globalAlpha = 0.4 + 0.2 * Math.sin(performance.now() * 0.01);
-    ctx.strokeStyle = '#ff6600';
-    ctx.lineWidth = 2;
+function drawStatusIcons(fighter, x, y) {
+  const keys = Object.keys(fighter.powers);
+  if (keys.length === 0) return;
+  const startX = x - (keys.length * 18) / 2;
+  ctx.save();
+  ctx.font = '11px Arial';
+  ctx.textAlign = 'center';
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const def = POWER_DEFS[key];
+    if (!def) continue;
+    const px = startX + i * 20;
+    const bobble = Math.sin(performance.now() * 0.004 + i) * 2;
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = def.color;
     ctx.beginPath();
-    ctx.ellipse(dx, dy, 65, 55, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+    ctx.arc(px, y + bobble, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 9px "Segoe UI"';
+    ctx.fillText(fighter.powers[key], px, y + bobble + 3);
   }
+  ctx.restore();
 }
 
 function drawHPBar(fighter, x, y, width) {
-  const barH = 22;
+  const barH = 24;
   const hpPct = Math.max(0, fighter.hp / fighter.maxHp);
   const hpColor = hpPct > 0.5 ? '#44dd66' : hpPct > 0.25 ? '#ddaa44' : '#dd4444';
 
   // Background
-  ctx.fillStyle = '#1a1a2a';
+  ctx.fillStyle = '#0a0a1a';
   ctx.strokeStyle = '#444466';
   ctx.lineWidth = 2;
   roundRect(x, y, width, barH, 6, true, true);
@@ -666,257 +1012,267 @@ function drawHPBar(fighter, x, y, width) {
     roundRect(x + 2, y + 2, (width - 4) * hpPct, barH - 4, 4, true, false);
   }
 
-  // Shield overlay
-  if (fighter.shield > 0) {
-    ctx.fillStyle = 'rgba(68, 136, 255, 0.4)';
-    const shieldPct = Math.min(1, fighter.shield / 30);
-    roundRect(x + 2, y + 2, (width - 4) * shieldPct, barH - 4, 4, true, false);
+  // Block overlay
+  if (fighter.block > 0) {
+    ctx.fillStyle = 'rgba(68, 136, 255, 0.35)';
+    const blockPct = Math.min(1, fighter.block / 30);
+    roundRect(x + 2, y + 2, (width - 4) * blockPct, barH - 4, 4, true, false);
   }
 
-  // Text
+  // HP text
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 13px "Segoe UI", Arial';
   ctx.textAlign = 'center';
-  ctx.fillText(`${fighter.hp}/${fighter.maxHp}`, x + width / 2, y + barH - 6);
+  ctx.fillText(`${Math.max(0, fighter.hp)} / ${fighter.maxHp}`, x + width / 2, y + barH - 7);
 
-  // Name above
+  // Name + element above
   ctx.font = 'bold 14px "Segoe UI", Arial';
   ctx.fillStyle = '#ddd';
-  ctx.fillText(fighter.name, x + width / 2, y - 8);
+  const elemIcon = fighter.element === 'fire' ? '🔥' : fighter.element === 'water' ? '💧' : fighter.element === 'grass' ? '🌿' : '';
+  ctx.fillText(`${elemIcon} ${fighter.name}`, x + width / 2, y - 8);
 
-  // Status icons
-  let statusX = x + width + 8;
-  if (fighter.shield > 0) {
-    ctx.font = '14px Arial';
-    ctx.textAlign = 'left';
+  // Block / status to the right
+  let sx = x + width + 8;
+  ctx.textAlign = 'left';
+  ctx.font = '13px Arial';
+  if (fighter.block > 0) {
     ctx.fillStyle = '#4488ff';
-    ctx.fillText(`🛡️${fighter.shield}`, statusX, y + 16);
-    statusX += 45;
+    ctx.fillText(`🛡️${fighter.block}`, sx, y + 16);
+    sx += 45;
   }
-  if (fighter.poison > 0) {
-    ctx.font = '14px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#aa44ff';
-    ctx.fillText(`☠️${fighter.poison}`, statusX, y + 16);
-  }
+}
+
+function drawIntent() {
+  if (!nextIntent || gameState === 'win' || gameState === 'lose') return;
+  const ix = enemy.x;
+  const iy = 60;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.globalAlpha = 0.85;
+
+  // Intent box
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  roundRect(ix - 50, iy - 8, 100, 34, 6, true, false);
+  ctx.strokeStyle = nextIntent.color + '88';
+  ctx.lineWidth = 1;
+  roundRect(ix - 50, iy - 8, 100, 34, 6, false, true);
+
+  ctx.font = '16px Arial';
+  ctx.fillText(nextIntent.icon, ix - 30, iy + 16);
+  ctx.font = 'bold 12px "Segoe UI"';
+  ctx.fillStyle = nextIntent.color;
+  ctx.fillText(nextIntent.name, ix + 10, iy + 8);
+
+  // Show damage/effect value
+  ctx.font = '11px "Segoe UI"';
+  ctx.fillStyle = '#ccc';
+  if (nextIntent.dmg) ctx.fillText(`${nextIntent.dmg} dmg`, ix + 10, iy + 22);
+  else if (nextIntent.heal) ctx.fillText(`+${nextIntent.heal} HP`, ix + 10, iy + 22);
+  else if (nextIntent.block) ctx.fillText(`+${nextIntent.block} blk`, ix + 10, iy + 22);
+  else if (nextIntent.weak) ctx.fillText(`${nextIntent.weak} weak`, ix + 10, iy + 22);
+
+  ctx.restore();
 }
 
 function drawCards() {
   if (gameState !== 'playerTurn') return;
-  const cardW = 100;
-  const cardH = 140;
-  const gap = 8;
+  const cardW = 90, cardH = 130, gap = 6;
   const totalW = hand.length * (cardW + gap) - gap;
-  const startX = (canvas.width - totalW) / 2;
-  const baseY = canvas.height - cardH - 20;
+  const startX = Math.max(10, (W - totalW) / 2);
+  const baseY = H - cardH - 18;
 
   for (let i = 0; i < hand.length; i++) {
     const card = hand[i];
     const x = startX + i * (cardW + gap);
     const isHovered = i === hoveredCard;
-    const isSelected = i === selectedCard;
-    const canAfford = card.cost <= energy;
-    const y = isHovered ? baseY - 20 : isSelected ? baseY - 15 : baseY;
+    const canAfford = canPlayCard(card);
+    const y = isHovered ? baseY - 25 : baseY;
 
     ctx.save();
 
-    // Card shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
     roundRect(x + 3, y + 3, cardW, cardH, 8, true, false);
 
     // Card background
     const grad = ctx.createLinearGradient(x, y, x, y + cardH);
-    if (!canAfford) {
-      grad.addColorStop(0, '#2a2a3a');
-      grad.addColorStop(1, '#1a1a2a');
-    } else {
-      grad.addColorStop(0, '#2a2a4a');
-      grad.addColorStop(1, '#1a1a3a');
-    }
+    grad.addColorStop(0, canAfford ? '#2a2a4a' : '#1e1e2a');
+    grad.addColorStop(1, canAfford ? '#1a1a3a' : '#141420');
     ctx.fillStyle = grad;
-    ctx.strokeStyle = isSelected ? '#ffcc00' : isHovered && canAfford ? '#8888ff' : canAfford ? card.color + '88' : '#333';
-    ctx.lineWidth = isSelected ? 3 : 2;
+    ctx.strokeStyle = isHovered && canAfford ? '#aaaaff' : canAfford ? card.color + '66' : '#2a2a2a';
+    ctx.lineWidth = isHovered ? 2.5 : 1.5;
     roundRect(x, y, cardW, cardH, 8, true, true);
 
     // Color accent bar
-    ctx.fillStyle = canAfford ? card.color : '#444';
-    roundRect(x + 4, y + 4, cardW - 8, 4, 2, true, false);
+    ctx.fillStyle = canAfford ? card.color : '#333';
+    roundRect(x + 4, y + 4, cardW - 8, 3, 2, true, false);
 
-    // Icon
-    ctx.font = '28px Arial';
-    ctx.textAlign = 'center';
-    ctx.globalAlpha = canAfford ? 1 : 0.4;
-    ctx.fillText(card.icon, x + cardW / 2, y + 48);
-
-    // Name
-    ctx.font = 'bold 12px "Segoe UI", Arial';
-    ctx.fillStyle = canAfford ? '#fff' : '#666';
-    ctx.fillText(card.name, x + cardW / 2, y + 72);
-
-    // Description
-    ctx.font = '10px "Segoe UI", Arial';
-    ctx.fillStyle = canAfford ? '#aaa' : '#555';
-    ctx.fillText(card.desc, x + cardW / 2, y + 90);
-
-    // Damage/effect value
-    if (card.dmg !== 0) {
-      ctx.font = 'bold 16px "Segoe UI", Arial';
-      ctx.fillStyle = card.dmg > 0 ? '#ff6644' : '#44dd66';
-      ctx.fillText(card.dmg > 0 ? `-${card.dmg}` : `+${Math.abs(card.dmg)}`, x + cardW / 2, y + 115);
+    // Exhaust indicator
+    if (card.exhaust) {
+      ctx.fillStyle = '#ffcc0033';
+      roundRect(x + 2, y + 2, cardW - 4, cardH - 4, 6, true, false);
     }
 
-    // Energy cost (top-right circle)
+    ctx.globalAlpha = canAfford ? 1 : 0.35;
+
+    // Icon
+    ctx.font = '24px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(card.icon, x + cardW / 2, y + 40);
+
+    // Name
+    ctx.font = 'bold 11px "Segoe UI"';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(card.name, x + cardW / 2, y + 60);
+
+    // Description
+    ctx.font = '9px "Segoe UI"';
+    ctx.fillStyle = '#aaa';
+    // Word wrap desc
+    const words = card.desc.split(' ');
+    let line = '', ly = y + 75;
+    for (const word of words) {
+      const test = line + word + ' ';
+      if (ctx.measureText(test).width > cardW - 12 && line) {
+        ctx.fillText(line.trim(), x + cardW / 2, ly);
+        line = word + ' ';
+        ly += 11;
+      } else {
+        line = test;
+      }
+    }
+    ctx.fillText(line.trim(), x + cardW / 2, ly);
+
+    // Element badge
+    if (card.element && card.element !== 'neutral') {
+      ctx.font = '10px Arial';
+      const elemIcon = card.element === 'fire' ? '🔥' : card.element === 'water' ? '💧' : '🌿';
+      ctx.fillText(elemIcon, x + 12, y + 18);
+    }
+
+    // Exhaust label
+    if (card.exhaust) {
+      ctx.font = 'bold 8px "Segoe UI"';
+      ctx.fillStyle = '#ffcc00';
+      ctx.fillText('EXHAUST', x + cardW / 2, y + cardH - 8);
+    }
+
+    // Energy cost (top-right)
     ctx.globalAlpha = 1;
     ctx.beginPath();
-    ctx.arc(x + cardW - 14, y + 14, 13, 0, Math.PI * 2);
-    ctx.fillStyle = canAfford ? '#4466aa' : '#332233';
+    ctx.arc(x + cardW - 13, y + 13, 12, 0, Math.PI * 2);
+    ctx.fillStyle = canAfford ? '#3355aa' : '#221133';
     ctx.fill();
-    ctx.strokeStyle = canAfford ? '#6688cc' : '#443344';
+    ctx.strokeStyle = canAfford ? '#5577cc' : '#332244';
     ctx.lineWidth = 2;
     ctx.stroke();
-    ctx.font = 'bold 14px "Segoe UI", Arial';
-    ctx.fillStyle = canAfford ? '#aaddff' : '#554455';
-    ctx.fillText(card.cost, x + cardW - 14, y + 19);
+    ctx.font = 'bold 13px "Segoe UI"';
+    ctx.fillStyle = canAfford ? '#aaddff' : '#443355';
+    ctx.fillText(card.cost, x + cardW - 13, y + 18);
 
     ctx.restore();
   }
 }
 
 function drawEnergyBar() {
-  const x = 30;
-  const y = canvas.height - 55;
-  ctx.font = 'bold 14px "Segoe UI", Arial';
+  const x = 20, y = H - 50;
+  ctx.font = 'bold 13px "Segoe UI"';
   ctx.textAlign = 'left';
   ctx.fillStyle = '#aaddff';
-  ctx.fillText('ENERGY', x, y - 8);
+  ctx.fillText('ENERGY', x, y - 6);
 
   for (let i = 0; i < ENERGY_MAX; i++) {
     ctx.beginPath();
-    ctx.arc(x + 16 + i * 30, y + 12, 12, 0, Math.PI * 2);
-    ctx.fillStyle = i < energy ? '#4488ff' : '#222244';
+    ctx.arc(x + 14 + i * 28, y + 10, 11, 0, Math.PI * 2);
+    ctx.fillStyle = i < energy ? '#4488ff' : '#181830';
     ctx.fill();
-    ctx.strokeStyle = i < energy ? '#6699ff' : '#333355';
+    ctx.strokeStyle = i < energy ? '#6699ff' : '#2a2a44';
     ctx.lineWidth = 2;
     ctx.stroke();
-
     if (i < energy) {
       ctx.beginPath();
-      ctx.arc(x + 16 + i * 30, y + 10, 5, 0, Math.PI * 2);
+      ctx.arc(x + 14 + i * 28, y + 8, 4, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
       ctx.fill();
     }
   }
+
+  // Deck / discard counts
+  ctx.font = '11px "Segoe UI"';
+  ctx.fillStyle = '#888';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Draw: ${drawPile.length}  Disc: ${discardPile.length}  Exh: ${exhaustPile.length}`, x + 100, y + 14);
 }
 
 function drawEndTurnButton() {
   if (gameState !== 'playerTurn') return;
-  const bx = canvas.width - 140;
-  const by = canvas.height - 65;
-  const bw = 110;
-  const bh = 40;
-
-  ctx.fillStyle = endTurnHovered ? '#5566aa' : '#3344778';
-  ctx.strokeStyle = endTurnHovered ? '#88aaff' : '#556688';
+  const bx = W - 130, by = H - 58, bw = 105, bh = 38;
+  ctx.fillStyle = endTurnHovered ? '#4455aa' : '#2a3366';
+  ctx.strokeStyle = endTurnHovered ? '#7799ff' : '#445588';
   ctx.lineWidth = 2;
   roundRect(bx, by, bw, bh, 8, true, true);
-
-  ctx.font = 'bold 14px "Segoe UI", Arial';
+  ctx.font = 'bold 14px "Segoe UI"';
   ctx.textAlign = 'center';
-  ctx.fillStyle = endTurnHovered ? '#fff' : '#aabbdd';
+  ctx.fillStyle = endTurnHovered ? '#fff' : '#99aacc';
   ctx.fillText('END TURN', bx + bw / 2, by + bh / 2 + 5);
 }
 
 function drawTurnIndicator() {
-  ctx.font = 'bold 16px "Segoe UI", Arial';
+  ctx.font = 'bold 14px "Segoe UI"';
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#aaa';
-  ctx.fillText(`Turn ${turnNumber}`, canvas.width / 2, 25);
-
+  ctx.fillStyle = '#777';
+  ctx.fillText(`Turn ${turnNumber}`, W / 2, 22);
   if (gameState === 'playerTurn') {
     ctx.fillStyle = '#44dd66';
-    ctx.fillText('⚔️ YOUR TURN', canvas.width / 2, 50);
+    ctx.font = 'bold 15px "Segoe UI"';
+    ctx.fillText('YOUR TURN', W / 2, 42);
   } else if (gameState === 'enemyTurn' || gameState === 'animating') {
     ctx.fillStyle = '#ff6644';
-    ctx.fillText('🐸 ENEMY TURN', canvas.width / 2, 50);
-  }
-}
-
-function drawFloatingTexts(dt) {
-  for (let i = floatingTexts.length - 1; i >= 0; i--) {
-    const ft = floatingTexts[i];
-    ft.y += ft.vy * dt / 16;
-    ft.vy *= 0.98;
-    ft.life -= dt;
-    const alpha = Math.max(0, ft.life / ft.maxLife);
-    const scale = ft.scale * (0.8 + 0.2 * Math.min(1, (ft.maxLife - ft.life) / 200));
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.font = `bold ${Math.round(18 * scale)}px "Segoe UI", Arial`;
-    ctx.textAlign = 'center';
-
-    // Outline
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 4;
-    ctx.strokeText(ft.text, ft.x, ft.y);
-
-    ctx.fillStyle = ft.color;
-    ctx.fillText(ft.text, ft.x, ft.y);
-    ctx.restore();
-
-    if (ft.life <= 0) floatingTexts.splice(i, 1);
+    ctx.font = 'bold 15px "Segoe UI"';
+    ctx.fillText('ENEMY TURN', W / 2, 42);
   }
 }
 
 function drawWinLoseScreen() {
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(0, 0, W, H);
 
   const isWin = gameState === 'win';
   ctx.textAlign = 'center';
 
-  // Title
-  ctx.font = 'bold 64px "Segoe UI", Arial';
+  ctx.font = 'bold 60px "Segoe UI"';
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 6;
+  ctx.strokeText(isWin ? 'VICTORY!' : 'DEFEAT', W / 2, H / 2 - 40);
   ctx.fillStyle = isWin ? '#44dd66' : '#dd4444';
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = 6;
-  ctx.strokeText(isWin ? 'VICTORY!' : 'DEFEAT', canvas.width / 2, canvas.height / 2 - 40);
-  ctx.fillText(isWin ? 'VICTORY!' : 'DEFEAT', canvas.width / 2, canvas.height / 2 - 40);
+  ctx.fillText(isWin ? 'VICTORY!' : 'DEFEAT', W / 2, H / 2 - 40);
 
-  // Subtitle
-  ctx.font = '24px "Segoe UI", Arial';
+  ctx.font = '22px "Segoe UI"';
   ctx.fillStyle = '#aaa';
-  ctx.fillText(isWin ? 'The enemy frog has been vanquished!' : 'Your frog has fallen...', canvas.width / 2, canvas.height / 2 + 10);
+  ctx.fillText(isWin ? 'The enemy frog has been vanquished!' : 'Your frog has fallen...', W / 2, H / 2 + 10);
 
-  // Stats
-  ctx.font = '16px "Segoe UI", Arial';
-  ctx.fillStyle = '#888';
-  ctx.fillText(`Completed in ${turnNumber} turns`, canvas.width / 2, canvas.height / 2 + 50);
+  ctx.font = '15px "Segoe UI"';
+  ctx.fillStyle = '#777';
+  ctx.fillText(`Completed in ${turnNumber} turns`, W / 2, H / 2 + 45);
 
   // Restart button
-  const bx = canvas.width / 2 - 80;
-  const by = canvas.height / 2 + 75;
-  ctx.fillStyle = restartHovered ? '#5566aa' : '#334477';
-  ctx.strokeStyle = '#556699';
-  ctx.lineWidth = 2;
-  roundRect(bx, by, 160, 45, 10, true, true);
-  ctx.font = 'bold 18px "Segoe UI", Arial';
+  const bx = W / 2 - 75, by = H / 2 + 70;
+  ctx.fillStyle = restartHovered ? '#4455aa' : '#2a3366';
+  ctx.strokeStyle = '#556699'; ctx.lineWidth = 2;
+  roundRect(bx, by, 150, 42, 10, true, true);
+  ctx.font = 'bold 17px "Segoe UI"';
   ctx.fillStyle = '#fff';
-  ctx.fillText('PLAY AGAIN', canvas.width / 2, by + 30);
+  ctx.fillText('PLAY AGAIN', W / 2, by + 28);
 
-  // Spawn victory/defeat particles
   if (Math.random() > 0.7) {
-    spawnParticles(
-      Math.random() * canvas.width, Math.random() * canvas.height / 2,
-      1, isWin ? '#44dd66' : '#dd4444', 'star', 2
-    );
+    spawnParticles(Math.random() * W, Math.random() * H / 2, 1, isWin ? '#44dd66' : '#dd4444', 'star', 2);
   }
   ctx.restore();
 }
 
-let restartHovered = false;
-
+// ============================================================
+//  UTILITY
+// ============================================================
 function roundRect(x, y, w, h, r, fill, stroke) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -941,11 +1297,13 @@ function shadeColor(color, percent) {
   return `rgb(${r},${g},${b})`;
 }
 
-// ---- Input ----
+// ============================================================
+//  INPUT
+// ============================================================
 canvas.addEventListener('mousemove', (e) => {
   const rect = canvas.getBoundingClientRect();
-  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const mx = (e.clientX - rect.left) * (W / rect.width);
+  const my = (e.clientY - rect.top) * (H / rect.height);
 
   hoveredCard = -1;
   endTurnHovered = false;
@@ -953,31 +1311,29 @@ canvas.addEventListener('mousemove', (e) => {
   canvas.style.cursor = 'default';
 
   if (gameState === 'playerTurn') {
-    const cardW = 100, cardH = 140, gap = 8;
+    const cardW = 90, cardH = 130, gap = 6;
     const totalW = hand.length * (cardW + gap) - gap;
-    const startX = (canvas.width - totalW) / 2;
-    const baseY = canvas.height - cardH - 20;
+    const startX = Math.max(10, (W - totalW) / 2);
+    const baseY = H - cardH - 18;
 
     for (let i = 0; i < hand.length; i++) {
       const x = startX + i * (cardW + gap);
-      if (mx >= x && mx <= x + cardW && my >= baseY - 20 && my <= baseY + cardH) {
+      if (mx >= x && mx <= x + cardW && my >= baseY - 25 && my <= baseY + cardH) {
         hoveredCard = i;
-        if (hand[i].cost <= energy) canvas.style.cursor = 'pointer';
+        if (canPlayCard(hand[i])) canvas.style.cursor = 'pointer';
         break;
       }
     }
-
-    // End turn button
-    const bx = canvas.width - 140, by = canvas.height - 65;
-    if (mx >= bx && mx <= bx + 110 && my >= by && my <= by + 40) {
+    const bx = W - 130, by = H - 58;
+    if (mx >= bx && mx <= bx + 105 && my >= by && my <= by + 38) {
       endTurnHovered = true;
       canvas.style.cursor = 'pointer';
     }
   }
 
   if (gameState === 'win' || gameState === 'lose') {
-    const bx = canvas.width / 2 - 80, by = canvas.height / 2 + 75;
-    if (mx >= bx && mx <= bx + 160 && my >= by && my <= by + 45) {
+    const bx = W / 2 - 75, by = H / 2 + 70;
+    if (mx >= bx && mx <= bx + 150 && my >= by && my <= by + 42) {
       restartHovered = true;
       canvas.style.cursor = 'pointer';
     }
@@ -986,26 +1342,24 @@ canvas.addEventListener('mousemove', (e) => {
 
 canvas.addEventListener('click', (e) => {
   const rect = canvas.getBoundingClientRect();
-  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const mx = (e.clientX - rect.left) * (W / rect.width);
+  const my = (e.clientY - rect.top) * (H / rect.height);
 
   if (gameState === 'playerTurn') {
-    if (hoveredCard >= 0 && hand[hoveredCard] && hand[hoveredCard].cost <= energy) {
+    if (hoveredCard >= 0 && hand[hoveredCard] && canPlayCard(hand[hoveredCard])) {
       playCard(hoveredCard);
       return;
     }
-    if (endTurnHovered) {
-      endTurn();
-      return;
-    }
+    if (endTurnHovered) { endTurn(); return; }
   }
-
   if ((gameState === 'win' || gameState === 'lose') && restartHovered) {
     init();
   }
 });
 
-// ---- Game loop ----
+// ============================================================
+//  GAME LOOP
+// ============================================================
 let lastTime = 0;
 
 function gameLoop(timestamp) {
@@ -1021,31 +1375,37 @@ function gameLoop(timestamp) {
       f.frame = (f.frame + 1) % 6;
     }
     if (f.flash > 0) f.flash = Math.max(0, f.flash - dt);
-    if (f.shakeX !== 0) f.shakeX *= 0.85;
-    if (Math.abs(f.shakeX) < 0.5) f.shakeX = 0;
   }
 
-  // Update particles
-  particles = particles.filter(p => p.update(dt));
+  updateTweens(dt);
+  updateShake(dt);
+  updateParticles(dt);
+  updateFloatingTexts(dt);
 
-  // Draw
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Draw with camera shake
+  ctx.save();
+  ctx.translate(camera.offsetX, camera.offsetY);
+  ctx.clearRect(-10, -10, W + 20, H + 20);
   drawBackground();
 
   if (player && enemy) {
-    drawSprite(player, 'player');
-    drawSprite(enemy, 'enemy');
-    drawHPBar(player, 40, 75, 200);
-    drawHPBar(enemy, canvas.width - 240, 75, 200);
+    drawSprite(player);
+    drawSprite(enemy);
+    drawHPBar(player, 30, 85, 200);
+    drawHPBar(enemy, W - 230, 85, 200);
+    drawIntent();
+    drawTurnIndicator();
+  }
+  drawParticles();
+  drawFloatingTexts();
+  ctx.restore();
+
+  // UI outside camera shake
+  if (player && enemy) {
     drawCards();
     drawEnergyBar();
     drawEndTurnButton();
-    drawTurnIndicator();
   }
-
-  // Draw particles
-  for (const p of particles) p.draw();
-  drawFloatingTexts(dt);
 
   if (gameState === 'win' || gameState === 'lose') {
     drawWinLoseScreen();
