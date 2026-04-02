@@ -360,36 +360,52 @@ function applyDamage(target, rawDmg, color = '#ff4444', isCrit = false) {
 }
 
 // ============================================================
-//  CARDS — Axie-style with creature portraits
+//  BODY PART CARD SYSTEM (core Axie mechanic)
+//  Each frog has 4 body parts: horn, mouth, back, tail
+//  Each part grants a unique card. Deck = 12 cards from your 3 frogs.
 // ============================================================
-const CARD_DEFS = [
-  { name: 'Slash',      cost: 1, baseDmg: 10, type: 'attack', powers: {},                color: '#e85d3a', icon: '⚔️',  desc: 'Deal 10 damage', sprite: 'ember' },
-  { name: 'Fireball',   cost: 2, baseDmg: 18, type: 'attack', powers: {},                color: '#e83a2a', icon: '🔥', desc: 'Deal 18 fire dmg', sprite: 'ember' },
-  { name: 'Bite',       cost: 1, baseDmg: 7,  type: 'attack', powers: {},                color: '#e8a03a', icon: '🦷', desc: '7 dmg x2 hits', sprite: 'ember', multi: 2 },
-  { name: 'Heavy Slam', cost: 2, baseDmg: 22, type: 'attack', powers: { vulnerable: 1 }, color: '#cc5533', icon: '💥', desc: '22 dmg + 1 Vuln', sprite: 'ember' },
-  { name: 'Venom Spit', cost: 2, baseDmg: 8,  type: 'attack', powers: { poison: 4 },     color: '#aa44ff', icon: '☠️',  desc: '8 dmg + 4 Poison', sprite: 'toxic' },
-  { name: 'Heal',       cost: 1, heal: 15,    type: 'skill',  powers: {},                color: '#44bb55', icon: '💚', desc: 'Heal 15 HP', sprite: 'frost' },
-  { name: 'Shield',     cost: 1, block: 10,   type: 'skill',  powers: {},                color: '#4488cc', icon: '🛡️',  desc: 'Gain 10 Block', sprite: 'frost' },
-  { name: 'Rage',       cost: 1, type: 'power', powers: { strength: 2 }, selfPowers: true, color: '#e86830', icon: '💢', desc: 'Gain 2 Strength', sprite: 'ember' },
-  { name: 'Regen',      cost: 1, type: 'power', powers: { regen: 3 }, selfPowers: true,   color: '#44cc66', icon: '🌱', desc: 'Gain 3 Regen', sprite: 'frost' },
-  { name: 'Acid Bath',  cost: 2, baseDmg: 12, type: 'attack', powers: { weak: 2 },       color: '#88cc22', icon: '🧪', desc: '12 dmg + 2 Weak', sprite: 'toxic' },
-  { name: 'Soul Drain', cost: 3, baseDmg: 20, type: 'attack', powers: {},                color: '#cc44aa', icon: '🩸', desc: '20 dmg, heal 50%', sprite: 'ember', drain: true },
-];
+const BODY_PARTS = {
+  // ---- EMBER (fire frog) parts ----
+  ember_horn:  { part: 'horn',  name: 'Flame Horn',   cost: 1, baseDmg: 12, type: 'attack', powers: {},                color: '#e85d3a', desc: '12 damage',        sprite: 'ember' },
+  ember_mouth: { part: 'mouth', name: 'Fire Breath',  cost: 2, baseDmg: 18, type: 'attack', powers: {},                color: '#e83a2a', desc: '18 fire damage',   sprite: 'ember' },
+  ember_back:  { part: 'back',  name: 'Rage Aura',    cost: 1, type: 'power', powers: { strength: 2 }, selfPowers: true, color: '#e86830', desc: '+2 Strength',     sprite: 'ember' },
+  ember_tail:  { part: 'tail',  name: 'Tail Whip',    cost: 1, baseDmg: 8,  type: 'attack', powers: {},                color: '#e8a03a', desc: '8 dmg x2 hits',   sprite: 'ember', multi: 2 },
+
+  // ---- FROST (ice frog) parts ----
+  frost_horn:  { part: 'horn',  name: 'Ice Spike',    cost: 1, baseDmg: 10, type: 'attack', powers: { weak: 1 },      color: '#4488cc', desc: '10 dmg + 1 Weak',  sprite: 'frost' },
+  frost_mouth: { part: 'mouth', name: 'Frost Breath', cost: 1, heal: 15,    type: 'skill',  powers: {},                color: '#44bb55', desc: 'Heal 15 HP',       sprite: 'frost' },
+  frost_back:  { part: 'back',  name: 'Ice Armor',    cost: 1, block: 12,   type: 'skill',  powers: {},                color: '#66aadd', desc: 'Gain 12 Block',    sprite: 'frost' },
+  frost_tail:  { part: 'tail',  name: 'Regen Pulse',  cost: 1, type: 'power', powers: { regen: 3 }, selfPowers: true,   color: '#44cc66', desc: '+3 Regen',         sprite: 'frost' },
+
+  // ---- TOXIC (poison frog) parts ----
+  toxic_horn:  { part: 'horn',  name: 'Venom Horn',   cost: 2, baseDmg: 8,  type: 'attack', powers: { poison: 4 },     color: '#aa44ff', desc: '8 dmg + 4 Poison', sprite: 'toxic' },
+  toxic_mouth: { part: 'mouth', name: 'Acid Spit',    cost: 2, baseDmg: 12, type: 'attack', powers: { weak: 2 },       color: '#88cc22', desc: '12 dmg + 2 Weak',  sprite: 'toxic' },
+  toxic_back:  { part: 'back',  name: 'Toxic Shell',  cost: 1, block: 8,    type: 'skill',  powers: {},                color: '#66aa44', desc: '8 Block + 2 PSN',   sprite: 'toxic', selfBlock: true, applyPoison: 2 },
+  toxic_tail:  { part: 'tail',  name: 'Plague Tail',  cost: 2, baseDmg: 6,  type: 'attack', powers: { poison: 6 },     color: '#cc44aa', desc: '6 dmg + 6 Poison', sprite: 'toxic' },
+};
+
+// Frog templates: each defines which body parts it has
+const FROG_TEMPLATES = {
+  ember: { name: 'Ember', hp: 55, imgKey: 'ember', parts: ['ember_horn', 'ember_mouth', 'ember_back', 'ember_tail'] },
+  frost: { name: 'Frost', hp: 50, imgKey: 'frost', parts: ['frost_horn', 'frost_mouth', 'frost_back', 'frost_tail'] },
+  toxic: { name: 'Toxic', hp: 48, imgKey: 'toxic', parts: ['toxic_horn', 'toxic_mouth', 'toxic_back', 'toxic_tail'] },
+  // --- Hybrid variants (mix-and-match parts!) ---
+  blazer:  { name: 'Blazer',  hp: 52, imgKey: 'ember', parts: ['ember_horn', 'ember_mouth', 'frost_back', 'toxic_tail'] },
+  glacier: { name: 'Glacier', hp: 54, imgKey: 'frost', parts: ['frost_horn', 'toxic_mouth', 'frost_back', 'frost_tail'] },
+  viper:   { name: 'Viper',   hp: 46, imgKey: 'toxic', parts: ['toxic_horn', 'toxic_mouth', 'ember_back', 'toxic_tail'] },
+};
 
 // ============================================================
-//  FIGHTER (creature)
+//  FIGHTER (creature) — now created from FROG_TEMPLATES
 // ============================================================
-function createFrog(name, hp, imgKey, isPlayer, slot) {
-  // Positions: 3 frogs on each side, staggered like Axie
-  const px = isPlayer
-    ? [160, 230, 300][slot]
-    : [W - 160, W - 230, W - 300][slot];
-  const py = isPlayer
-    ? [340, 290, 380][slot]
-    : [340, 290, 380][slot];
+function createFrog(templateKey, isPlayer, slot) {
+  const tmpl = FROG_TEMPLATES[templateKey];
+  const px = isPlayer ? [160, 230, 300][slot] : [W - 160, W - 230, W - 300][slot];
+  const py = isPlayer ? [340, 290, 380][slot] : [340, 290, 380][slot];
   return {
-    name, hp, maxHp: hp, block: 0, powers: {}, alive: true,
-    imgKey, isPlayer, slot,
+    name: tmpl.name, templateKey, hp: tmpl.hp, maxHp: tmpl.hp,
+    block: 0, powers: {}, alive: true,
+    imgKey: tmpl.imgKey, parts: tmpl.parts, isPlayer, slot,
     x: px, y: py, baseX: px, baseY: py,
     scale: slot === 0 ? 2.8 : slot === 1 ? 2.4 : 2.0,
     scaleX: 1, scaleY: 1,
@@ -399,12 +415,28 @@ function createFrog(name, hp, imgKey, isPlayer, slot) {
 }
 
 // ============================================================
-//  DECK SYSTEM
+//  DECK SYSTEM — built from team body parts (core Axie mechanic)
+//  Each frog contributes 4 cards (one per body part)
+//  Total deck = 12 cards (3 frogs x 4 parts)
 // ============================================================
 let drawPile = [], hand = [], discardPile = [];
 function buildDeck() {
   const deck = [];
-  for (const def of CARD_DEFS) for (let i = 0; i < 2; i++) deck.push({ ...def, id: Math.random().toString(36).substr(2, 9) });
+  // Each frog on the player team contributes its 4 body-part cards
+  for (const frog of playerTeam) {
+    for (const partKey of frog.parts) {
+      const partDef = BODY_PARTS[partKey];
+      if (partDef) {
+        deck.push({
+          ...partDef,
+          ownerName: frog.name,        // which frog this card belongs to
+          ownerImgKey: frog.imgKey,     // for card portrait
+          sprite: partDef.sprite,       // sprite for card art
+          id: Math.random().toString(36).substr(2, 9)
+        });
+      }
+    }
+  }
   shuffle(deck); drawPile = deck; hand = []; discardPile = [];
 }
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } }
@@ -451,14 +483,14 @@ let enemyIntents = []; // one per enemy frog
 
 function init() {
   playerTeam = [
-    createFrog('Ember', 55, 'ember', true, 0),
-    createFrog('Frost', 50, 'frost', true, 1),
-    createFrog('Toxic', 48, 'toxic', true, 2),
+    createFrog('ember', true, 0),
+    createFrog('frost', true, 1),
+    createFrog('toxic', true, 2),
   ];
   enemyTeam = [
-    createFrog('Venom', 48, 'toxic', false, 0),
-    createFrog('Blaze', 44, 'ember', false, 1),
-    createFrog('Ice',   42, 'frost', false, 2),
+    createFrog('viper',   false, 0),
+    createFrog('blazer',  false, 1),
+    createFrog('glacier', false, 2),
   ];
   energy = ENERGY_MAX;
   turnNumber = 0;
@@ -564,10 +596,17 @@ function playCard(cardIndex, targetFrog) {
         spawnText(t.x, t.y - 50, `+${card.heal}`, '#44dd66');
         spawnParticles(t.x, t.y, 12, '#44ff66', 'circle', 4);
       }
-      if (card.block) {
-        attacker.block += card.block;
-        spawnText(attacker.x, attacker.y - 50, `+${card.block} BLK`, '#4488ff');
+      if (card.block || card.selfBlock) {
+        const blockAmt = card.block || 0;
+        attacker.block += blockAmt;
+        spawnText(attacker.x, attacker.y - 50, `+${blockAmt} BLK`, '#4488ff');
         spawnParticles(attacker.x, attacker.y, 10, '#4488ff', 'star', 3);
+      }
+      // Toxic Shell: also poisons the attacker's target
+      if (card.applyPoison && targetFrog) {
+        targetFrog.powers.poison = (targetFrog.powers.poison || 0) + card.applyPoison;
+        spawnText(targetFrog.x, targetFrog.y - 70, `+${card.applyPoison} PSN`, '#cc66ff');
+        spawnParticles(targetFrog.x, targetFrog.y, 6, '#aa44ff', 'circle', 3);
       }
       applyCardPowers(card, targetFrog);
       setTimeout(() => { gameState = 'playerTurn'; }, 300);
@@ -877,14 +916,20 @@ function drawHandCards() {
     // Damage/effect number
     if (card.baseDmg) {
       ctx.font = 'bold 22px "Segoe UI"'; ctx.fillStyle = '#c03020';
-      ctx.fillText(card.baseDmg, x + cardW / 2, y + 152);
+      ctx.fillText(card.baseDmg, x + cardW / 2, y + 145);
     } else if (card.heal) {
       ctx.font = 'bold 22px "Segoe UI"'; ctx.fillStyle = '#33aa44';
-      ctx.fillText(card.heal, x + cardW / 2, y + 152);
+      ctx.fillText(card.heal, x + cardW / 2, y + 145);
     } else if (card.block) {
       ctx.font = 'bold 22px "Segoe UI"'; ctx.fillStyle = '#3377cc';
-      ctx.fillText(card.block, x + cardW / 2, y + 152);
+      ctx.fillText(card.block || 0, x + cardW / 2, y + 145);
     }
+
+    // Body part label + owner name (bottom of card)
+    ctx.font = '9px "Segoe UI"'; ctx.fillStyle = '#8a7a6a';
+    const partLabel = (card.part || '').toUpperCase();
+    const ownerLabel = card.ownerName || '';
+    ctx.fillText(`${ownerLabel} - ${partLabel}`, x + cardW / 2, y + 164);
 
     ctx.restore();
   }
