@@ -56,38 +56,618 @@ const imageSources = {
   player: 'sprites/ember/ember_sheet_6frame.png',
   enemy:  'sprites/toxic/toxic_sheet_6frame.png',
   frost:  'sprites/frost/frost_sheet_6frame.png',
-  backgrounds: 'sprites/battle_backgrounds.png',
 };
 const BG_NAMES = ['Tropical', 'Volcano', 'Frozen', 'Cosmic', 'Inferno', 'Toxic Swamp'];
-const bgCanvases = []; // pre-split background canvases
+const bgCanvases = [];
 let currentBg = 0;
 let loadedCount = 0;
 const totalImages = Object.keys(imageSources).length;
 for (const [key, src] of Object.entries(imageSources)) {
   const img = new Image();
-  img.onload = () => {
-    loadedCount++;
-    // Pre-split backgrounds into individual canvases on load
-    if (key === 'backgrounds') {
-      const cols = 2, rows = 3;
-      const cellW = Math.floor(img.naturalWidth / cols);
-      const cellH = Math.floor(img.naturalHeight / rows);
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const offscreen = document.createElement('canvas');
-          offscreen.width = cellW;
-          offscreen.height = cellH;
-          const octx = offscreen.getContext('2d');
-          octx.drawImage(img, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
-          bgCanvases.push(offscreen);
-        }
-      }
-    }
-    if (loadedCount >= totalImages) init();
-  };
+  img.onload = () => { loadedCount++; if (loadedCount >= totalImages) { generateBackgrounds(); init(); } };
   img.onerror = () => console.error('Failed to load', src);
   img.src = src;
   images[key] = img;
+}
+
+// ============================================================
+//  PROCEDURAL BACKGROUND GENERATOR (inspired by original art)
+// ============================================================
+function generateBackgrounds() {
+  const bw = 960, bh = 640;
+  const configs = [
+    { // 0: Tropical — blue sky, green field, palm trees, mountains
+      sky: ['#4aa3df', '#87ceeb', '#c8e6c9'],
+      ground: ['#5d9e3a', '#7ec850', '#4a8c2a'],
+      mountains: ['#3a7a5a', '#2d6b4a'],
+      features: 'tropical',
+    },
+    { // 1: Volcano — red/orange sky, dark cracked ground, lava, erupting volcano
+      sky: ['#1a0a00', '#8b1a00', '#ff4400'],
+      ground: ['#1a1210', '#2a1a15', '#0d0a08'],
+      mountains: ['#2a1a10', '#1a0d08'],
+      features: 'volcano',
+    },
+    { // 2: Frozen — light blue sky, snow mountains, ice crystals
+      sky: ['#b8d4e8', '#e8f4f8', '#d0e8f0'],
+      ground: ['#c8dce8', '#e0eef5', '#a0c0d8'],
+      mountains: ['#e8f0f5', '#c8dce8'],
+      features: 'frozen',
+    },
+    { // 3: Cosmic — purple/magenta sky, floating islands, stars, nebula
+      sky: ['#0d0020', '#2a0845', '#4a1060'],
+      ground: ['#3a2020', '#4a2830', '#2a1515'],
+      mountains: ['#5a3040', '#3a1a25'],
+      features: 'cosmic',
+    },
+    { // 4: Inferno — dark purple, lava rivers, crystal formations
+      sky: ['#0a0015', '#1a0530', '#35104a'],
+      ground: ['#1a1008', '#0d0804', '#2a1810'],
+      mountains: ['#2a1530', '#1a0a20'],
+      features: 'inferno',
+    },
+    { // 5: Toxic Swamp — green glow, dead trees, acid pools
+      sky: ['#0a1a08', '#1a3010', '#2a4018'],
+      ground: ['#1a2a10', '#2a3a18', '#0d1a08'],
+      mountains: ['#3a4a20', '#2a3515'],
+      features: 'toxic',
+    },
+  ];
+
+  for (const cfg of configs) {
+    const c = document.createElement('canvas');
+    c.width = bw; c.height = bh;
+    const g = c.getContext('2d');
+    drawArenaBackground(g, bw, bh, cfg);
+    bgCanvases.push(c);
+  }
+}
+
+function drawArenaBackground(g, w, h, cfg) {
+  const groundY = h * 0.55;
+
+  // Sky gradient
+  const skyGrad = g.createLinearGradient(0, 0, 0, groundY);
+  cfg.sky.forEach((c, i) => skyGrad.addColorStop(i / (cfg.sky.length - 1), c));
+  g.fillStyle = skyGrad;
+  g.fillRect(0, 0, w, groundY + 30);
+
+  // Ground gradient
+  const gndGrad = g.createLinearGradient(0, groundY - 20, 0, h);
+  cfg.ground.forEach((c, i) => gndGrad.addColorStop(i / (cfg.ground.length - 1), c));
+  g.fillStyle = gndGrad;
+  g.fillRect(0, groundY - 20, w, h - groundY + 20);
+
+  // Feature-specific details
+  switch (cfg.features) {
+    case 'tropical': drawTropical(g, w, h, groundY); break;
+    case 'volcano':  drawVolcano(g, w, h, groundY); break;
+    case 'frozen':   drawFrozen(g, w, h, groundY); break;
+    case 'cosmic':   drawCosmic(g, w, h, groundY); break;
+    case 'inferno':  drawInferno(g, w, h, groundY); break;
+    case 'toxic':    drawToxicSwamp(g, w, h, groundY); break;
+  }
+
+  // Ground line (subtle)
+  g.strokeStyle = 'rgba(255,255,255,0.08)';
+  g.lineWidth = 2;
+  g.beginPath();
+  g.moveTo(0, groundY);
+  for (let x = 0; x <= w; x += 20) {
+    g.lineTo(x, groundY + Math.sin(x * 0.02) * 5 + Math.sin(x * 0.05) * 3);
+  }
+  g.stroke();
+}
+
+function drawMountains(g, w, baseY, color1, color2, count, maxH, jagged) {
+  for (let i = 0; i < count; i++) {
+    const cx = (w / (count - 1)) * i + (Math.random() - 0.5) * 80;
+    const mw = 120 + Math.random() * 200;
+    const mh = maxH * (0.6 + Math.random() * 0.4);
+    const grad = g.createLinearGradient(cx, baseY - mh, cx, baseY);
+    grad.addColorStop(0, color1);
+    grad.addColorStop(1, color2);
+    g.fillStyle = grad;
+    g.beginPath();
+    g.moveTo(cx - mw / 2, baseY);
+    if (jagged) {
+      const steps = 6 + Math.floor(Math.random() * 4);
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const x = cx - mw / 2 + mw * t;
+        const peakT = 1 - Math.abs(t - 0.5) * 2;
+        const y = baseY - mh * peakT + (Math.random() - 0.5) * mh * 0.15;
+        g.lineTo(x, y);
+      }
+    } else {
+      g.lineTo(cx - mw * 0.1, baseY - mh);
+      g.lineTo(cx + mw * 0.1, baseY - mh * 0.9);
+      g.lineTo(cx + mw / 2, baseY);
+    }
+    g.closePath();
+    g.fill();
+  }
+}
+
+function drawClouds(g, w, baseY, color, count) {
+  g.fillStyle = color;
+  for (let i = 0; i < count; i++) {
+    const cx = Math.random() * w;
+    const cy = 30 + Math.random() * baseY * 0.5;
+    const cw = 80 + Math.random() * 160;
+    const ch = 25 + Math.random() * 30;
+    g.globalAlpha = 0.2 + Math.random() * 0.3;
+    g.beginPath();
+    g.ellipse(cx, cy, cw, ch, 0, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.ellipse(cx - cw * 0.3, cy + 5, cw * 0.6, ch * 0.7, 0, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.ellipse(cx + cw * 0.3, cy + 3, cw * 0.5, ch * 0.8, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
+function drawStars(g, w, h, count, colors) {
+  for (let i = 0; i < count; i++) {
+    const sx = Math.random() * w;
+    const sy = Math.random() * h * 0.5;
+    const sr = 0.5 + Math.random() * 2;
+    g.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+    g.globalAlpha = 0.4 + Math.random() * 0.6;
+    g.beginPath();
+    g.arc(sx, sy, sr, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
+function drawRocks(g, groundY, w, count, colors) {
+  for (let i = 0; i < count; i++) {
+    const rx = Math.random() * w;
+    const ry = groundY + Math.random() * 80 - 10;
+    const rw = 15 + Math.random() * 40;
+    const rh = 10 + Math.random() * 25;
+    g.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+    g.globalAlpha = 0.6 + Math.random() * 0.4;
+    g.beginPath();
+    g.moveTo(rx - rw / 2, ry);
+    g.lineTo(rx - rw * 0.3, ry - rh);
+    g.lineTo(rx + rw * 0.2, ry - rh * 0.8);
+    g.lineTo(rx + rw / 2, ry);
+    g.closePath();
+    g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
+// ---------- TROPICAL ----------
+function drawTropical(g, w, h, groundY) {
+  drawMountains(g, w, groundY + 20, '#3a8a5a', '#2a6a3a', 5, 200, false);
+  drawMountains(g, w, groundY + 10, '#4a9a6a', '#3a7a4a', 4, 140, false);
+  drawClouds(g, w, groundY, 'rgba(255,255,255,0.9)', 6);
+
+  // Palm trees
+  for (const px of [80, 200, 750, 880]) {
+    const py = groundY - 5;
+    // Trunk
+    g.strokeStyle = '#6b4226';
+    g.lineWidth = 8;
+    g.beginPath();
+    g.moveTo(px, py);
+    g.quadraticCurveTo(px + 10, py - 80, px + 5, py - 140);
+    g.stroke();
+    // Fronds
+    for (let f = 0; f < 6; f++) {
+      const angle = (f / 6) * Math.PI * 2;
+      const fx = px + 5 + Math.cos(angle) * 60;
+      const fy = py - 140 + Math.sin(angle) * 30 + (Math.sin(angle) > 0 ? 15 : -5);
+      g.strokeStyle = '#2d8a2e';
+      g.lineWidth = 4;
+      g.beginPath();
+      g.moveTo(px + 5, py - 140);
+      g.quadraticCurveTo(px + 5 + Math.cos(angle) * 30, py - 145 + Math.sin(angle) * 10, fx, fy);
+      g.stroke();
+    }
+  }
+
+  // Grass tufts
+  g.strokeStyle = '#4a9a3a';
+  g.lineWidth = 2;
+  for (let i = 0; i < 40; i++) {
+    const gx = Math.random() * w;
+    const gy = groundY + Math.random() * 20;
+    for (let b = 0; b < 3; b++) {
+      g.beginPath();
+      g.moveTo(gx + b * 4 - 4, gy);
+      g.quadraticCurveTo(gx + b * 4 - 2 + (Math.random() - 0.5) * 10, gy - 12, gx + b * 4 + (Math.random() - 0.5) * 8, gy - 18 - Math.random() * 8);
+      g.stroke();
+    }
+  }
+
+  // Flowers
+  for (let i = 0; i < 15; i++) {
+    g.fillStyle = ['#ff4466', '#ffaa22', '#ff66aa', '#ffff44'][Math.floor(Math.random() * 4)];
+    const fx = Math.random() * w;
+    const fy = groundY + 5 + Math.random() * 30;
+    g.beginPath();
+    g.arc(fx, fy, 3 + Math.random() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  drawRocks(g, groundY, w, 8, ['#7a8a6a', '#6a7a5a', '#8a9a7a']);
+}
+
+// ---------- VOLCANO ----------
+function drawVolcano(g, w, h, groundY) {
+  // Volcano mountain (center-back)
+  const vcx = w * 0.5, vby = groundY + 20;
+  const grad = g.createLinearGradient(vcx, vby - 280, vcx, vby);
+  grad.addColorStop(0, '#3a1a08');
+  grad.addColorStop(0.7, '#2a1208');
+  grad.addColorStop(1, '#1a0d05');
+  g.fillStyle = grad;
+  g.beginPath();
+  g.moveTo(vcx - 250, vby);
+  g.lineTo(vcx - 60, vby - 280);
+  g.lineTo(vcx - 30, vby - 260);
+  g.lineTo(vcx + 30, vby - 265);
+  g.lineTo(vcx + 60, vby - 275);
+  g.lineTo(vcx + 250, vby);
+  g.closePath();
+  g.fill();
+
+  // Lava glow at crater
+  const lavaGrad = g.createRadialGradient(vcx, vby - 270, 5, vcx, vby - 250, 80);
+  lavaGrad.addColorStop(0, 'rgba(255,200,50,0.9)');
+  lavaGrad.addColorStop(0.3, 'rgba(255,100,0,0.6)');
+  lavaGrad.addColorStop(1, 'rgba(255,50,0,0)');
+  g.fillStyle = lavaGrad;
+  g.fillRect(vcx - 80, vby - 310, 160, 100);
+
+  // Lava eruption streaks
+  g.strokeStyle = '#ff6600';
+  g.lineWidth = 3;
+  for (let i = 0; i < 8; i++) {
+    g.globalAlpha = 0.5 + Math.random() * 0.5;
+    const ex = vcx + (Math.random() - 0.5) * 40;
+    g.beginPath();
+    g.moveTo(ex, vby - 270);
+    g.quadraticCurveTo(ex + (Math.random() - 0.5) * 100, vby - 330 - Math.random() * 60, ex + (Math.random() - 0.5) * 60, vby - 350 - Math.random() * 50);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  // Side mountains
+  drawMountains(g, w, groundY + 15, '#2a1510', '#1a0d08', 6, 160, true);
+
+  // Lava cracks on ground
+  g.strokeStyle = '#ff4400';
+  g.lineWidth = 3;
+  g.shadowColor = '#ff6600';
+  g.shadowBlur = 10;
+  for (let i = 0; i < 12; i++) {
+    g.globalAlpha = 0.4 + Math.random() * 0.4;
+    const lx = Math.random() * w;
+    const ly = groundY + 10 + Math.random() * (h - groundY - 30);
+    g.beginPath();
+    g.moveTo(lx, ly);
+    let cx = lx, cy = ly;
+    for (let s = 0; s < 3 + Math.floor(Math.random() * 4); s++) {
+      cx += (Math.random() - 0.5) * 60;
+      cy += Math.random() * 20;
+      g.lineTo(cx, cy);
+    }
+    g.stroke();
+  }
+  g.shadowBlur = 0;
+  g.globalAlpha = 1;
+
+  // Embers in sky
+  for (let i = 0; i < 30; i++) {
+    g.fillStyle = Math.random() > 0.5 ? '#ff6600' : '#ffaa00';
+    g.globalAlpha = 0.3 + Math.random() * 0.5;
+    g.beginPath();
+    g.arc(Math.random() * w, Math.random() * groundY, 1 + Math.random() * 2, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+
+  // Smoke clouds
+  drawClouds(g, w, groundY * 0.3, 'rgba(60,30,10,0.8)', 4);
+
+  drawRocks(g, groundY, w, 10, ['#2a1a10', '#3a2215', '#1a1008']);
+}
+
+// ---------- FROZEN ----------
+function drawFrozen(g, w, h, groundY) {
+  // Snow mountains
+  drawMountains(g, w, groundY + 10, '#e8f0f5', '#c0d4e0', 5, 220, true);
+  drawMountains(g, w, groundY + 5, '#d0e4ee', '#b0c8d8', 4, 160, true);
+
+  // Snow caps (white highlights on peaks)
+  g.fillStyle = 'rgba(255,255,255,0.4)';
+  for (let i = 0; i < 20; i++) {
+    g.beginPath();
+    g.arc(Math.random() * w, groundY - 50 - Math.random() * 150, 15 + Math.random() * 30, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  drawClouds(g, w, groundY * 0.4, 'rgba(230,240,248,0.8)', 5);
+
+  // Ice crystals
+  g.strokeStyle = '#a0d8f0';
+  g.lineWidth = 2;
+  for (let i = 0; i < 8; i++) {
+    const ix = 50 + Math.random() * (w - 100);
+    const iy = groundY - 10 + Math.random() * 30;
+    const ih = 20 + Math.random() * 40;
+    g.globalAlpha = 0.4 + Math.random() * 0.4;
+    // Crystal shape
+    g.fillStyle = 'rgba(160,216,240,0.3)';
+    g.beginPath();
+    g.moveTo(ix, iy);
+    g.lineTo(ix - 8, iy - ih * 0.4);
+    g.lineTo(ix - 4, iy - ih);
+    g.lineTo(ix + 4, iy - ih * 0.9);
+    g.lineTo(ix + 8, iy - ih * 0.3);
+    g.closePath();
+    g.fill();
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  // Snow on ground
+  g.fillStyle = 'rgba(230,240,250,0.3)';
+  for (let i = 0; i < 30; i++) {
+    g.beginPath();
+    g.ellipse(Math.random() * w, groundY + Math.random() * 80, 20 + Math.random() * 50, 5 + Math.random() * 8, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // Snowflakes
+  g.fillStyle = '#fff';
+  for (let i = 0; i < 40; i++) {
+    g.globalAlpha = 0.3 + Math.random() * 0.5;
+    g.beginPath();
+    g.arc(Math.random() * w, Math.random() * h * 0.8, 1 + Math.random() * 2, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+
+  drawRocks(g, groundY, w, 6, ['#b0c4d0', '#c0d4e0', '#90a8b8']);
+}
+
+// ---------- COSMIC ----------
+function drawCosmic(g, w, h, groundY) {
+  // Nebula glow
+  const nebGrad = g.createRadialGradient(w * 0.3, h * 0.25, 50, w * 0.5, h * 0.3, 300);
+  nebGrad.addColorStop(0, 'rgba(120,40,180,0.4)');
+  nebGrad.addColorStop(0.5, 'rgba(80,20,140,0.2)');
+  nebGrad.addColorStop(1, 'rgba(40,10,80,0)');
+  g.fillStyle = nebGrad;
+  g.fillRect(0, 0, w, h);
+
+  const neb2 = g.createRadialGradient(w * 0.7, h * 0.15, 30, w * 0.7, h * 0.2, 200);
+  neb2.addColorStop(0, 'rgba(200,60,100,0.3)');
+  neb2.addColorStop(1, 'rgba(100,20,60,0)');
+  g.fillStyle = neb2;
+  g.fillRect(0, 0, w, h);
+
+  drawStars(g, w, h, 100, ['#fff', '#aaccff', '#ffaacc', '#ccaaff']);
+
+  // Floating islands
+  for (const [fx, fy, fw] of [[150, 180, 100], [700, 140, 80], [450, 100, 60], [850, 200, 70]]) {
+    const iGrad = g.createLinearGradient(fx, fy, fx, fy + 40);
+    iGrad.addColorStop(0, '#5a3040');
+    iGrad.addColorStop(1, '#3a1a25');
+    g.fillStyle = iGrad;
+    g.beginPath();
+    g.ellipse(fx, fy + 10, fw, 15, 0, 0, Math.PI * 2);
+    g.fill();
+    // Top terrain
+    g.fillStyle = '#4a2535';
+    g.beginPath();
+    g.moveTo(fx - fw, fy + 5);
+    for (let t = 0; t <= 1; t += 0.1) {
+      g.lineTo(fx - fw + fw * 2 * t, fy - 5 - Math.sin(t * Math.PI) * 15 + (Math.random() - 0.5) * 5);
+    }
+    g.lineTo(fx + fw, fy + 5);
+    g.closePath();
+    g.fill();
+    // Glow underneath
+    g.globalAlpha = 0.3;
+    g.fillStyle = '#aa44ff';
+    g.beginPath();
+    g.ellipse(fx, fy + 20, fw * 0.7, 8, 0, 0, Math.PI * 2);
+    g.fill();
+    g.globalAlpha = 1;
+  }
+
+  // Dark rocky ground
+  drawMountains(g, w, groundY + 20, '#4a2535', '#2a1520', 5, 100, true);
+  drawRocks(g, groundY, w, 12, ['#5a3040', '#4a2535', '#3a1a25']);
+
+  // Purple lava cracks
+  g.strokeStyle = '#aa44ff';
+  g.lineWidth = 2;
+  g.shadowColor = '#cc66ff';
+  g.shadowBlur = 8;
+  for (let i = 0; i < 6; i++) {
+    g.globalAlpha = 0.4 + Math.random() * 0.3;
+    const lx = Math.random() * w;
+    const ly = groundY + 20 + Math.random() * 60;
+    g.beginPath();
+    g.moveTo(lx, ly);
+    for (let s = 0; s < 3; s++) g.lineTo(lx + (Math.random() - 0.5) * 80, ly + Math.random() * 30);
+    g.stroke();
+  }
+  g.shadowBlur = 0;
+  g.globalAlpha = 1;
+}
+
+// ---------- INFERNO ----------
+function drawInferno(g, w, h, groundY) {
+  // Deep lava glow from below
+  const lavaGlow = g.createLinearGradient(0, groundY, 0, h);
+  lavaGlow.addColorStop(0, 'rgba(255,80,0,0.1)');
+  lavaGlow.addColorStop(1, 'rgba(255,40,0,0.3)');
+  g.fillStyle = lavaGlow;
+  g.fillRect(0, groundY, w, h - groundY);
+
+  drawMountains(g, w, groundY + 15, '#2a1530', '#1a0a20', 6, 180, true);
+  drawStars(g, w, h, 30, ['#ffaa44', '#ff6644', '#ffcc88']);
+
+  // Crystal formations
+  for (let i = 0; i < 8; i++) {
+    const cx = 40 + Math.random() * (w - 80);
+    const cy = groundY - 5;
+    const ch = 30 + Math.random() * 60;
+    const cw = 6 + Math.random() * 10;
+    const grad = g.createLinearGradient(cx, cy, cx, cy - ch);
+    grad.addColorStop(0, '#4a2060');
+    grad.addColorStop(0.5, '#7a40a0');
+    grad.addColorStop(1, '#aa60d0');
+    g.fillStyle = grad;
+    g.globalAlpha = 0.6 + Math.random() * 0.4;
+    g.beginPath();
+    g.moveTo(cx - cw, cy);
+    g.lineTo(cx - cw * 0.3, cy - ch);
+    g.lineTo(cx + cw * 0.3, cy - ch * 0.85);
+    g.lineTo(cx + cw, cy);
+    g.closePath();
+    g.fill();
+    // Crystal glow
+    g.shadowColor = '#aa66ff';
+    g.shadowBlur = 12;
+    g.fill();
+    g.shadowBlur = 0;
+  }
+  g.globalAlpha = 1;
+
+  // Lava rivers
+  g.strokeStyle = '#ff4400';
+  g.lineWidth = 8;
+  g.shadowColor = '#ff6600';
+  g.shadowBlur = 15;
+  for (let i = 0; i < 4; i++) {
+    g.globalAlpha = 0.5 + Math.random() * 0.3;
+    const lx = Math.random() * w;
+    const ly = groundY + 30 + Math.random() * 60;
+    g.beginPath();
+    g.moveTo(lx, ly);
+    g.bezierCurveTo(lx + 80, ly - 10, lx + 160, ly + 20, lx + 200 + Math.random() * 100, ly + Math.random() * 30);
+    g.stroke();
+    // Inner glow
+    g.strokeStyle = '#ffaa00';
+    g.lineWidth = 3;
+    g.stroke();
+    g.strokeStyle = '#ff4400';
+    g.lineWidth = 8;
+  }
+  g.shadowBlur = 0;
+  g.globalAlpha = 1;
+
+  // Embers
+  for (let i = 0; i < 25; i++) {
+    g.fillStyle = ['#ff6600', '#ffaa00', '#ff4400'][Math.floor(Math.random() * 3)];
+    g.globalAlpha = 0.3 + Math.random() * 0.5;
+    g.beginPath();
+    g.arc(Math.random() * w, Math.random() * h, 1 + Math.random() * 2, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+
+  drawRocks(g, groundY, w, 8, ['#2a1530', '#1a0a20', '#3a2040']);
+}
+
+// ---------- TOXIC SWAMP ----------
+function drawToxicSwamp(g, w, h, groundY) {
+  // Green atmospheric glow
+  const glow = g.createRadialGradient(w * 0.5, groundY, 100, w * 0.5, groundY, 400);
+  glow.addColorStop(0, 'rgba(80,200,40,0.15)');
+  glow.addColorStop(1, 'rgba(40,100,20,0)');
+  g.fillStyle = glow;
+  g.fillRect(0, 0, w, h);
+
+  drawMountains(g, w, groundY + 15, '#3a4a20', '#2a3515', 4, 120, true);
+  drawClouds(g, w, groundY * 0.4, 'rgba(80,120,40,0.5)', 4);
+
+  // Dead trees
+  for (const tx of [100, 300, 650, 860]) {
+    const ty = groundY - 5;
+    g.strokeStyle = '#3a3020';
+    g.lineWidth = 6;
+    g.beginPath();
+    g.moveTo(tx, ty);
+    g.lineTo(tx + 3, ty - 80);
+    g.stroke();
+    // Branches
+    g.lineWidth = 3;
+    g.beginPath(); g.moveTo(tx + 3, ty - 60); g.lineTo(tx + 30, ty - 85); g.stroke();
+    g.beginPath(); g.moveTo(tx + 2, ty - 50); g.lineTo(tx - 25, ty - 75); g.stroke();
+    g.beginPath(); g.moveTo(tx + 3, ty - 35); g.lineTo(tx + 20, ty - 50); g.stroke();
+  }
+
+  // Acid pools
+  g.shadowColor = '#44ff00';
+  g.shadowBlur = 15;
+  for (let i = 0; i < 6; i++) {
+    const ax = 80 + Math.random() * (w - 160);
+    const ay = groundY + 20 + Math.random() * 80;
+    const aw = 30 + Math.random() * 70;
+    const ah = 8 + Math.random() * 15;
+    const poolGrad = g.createRadialGradient(ax, ay, 0, ax, ay, aw);
+    poolGrad.addColorStop(0, 'rgba(120,255,40,0.6)');
+    poolGrad.addColorStop(0.6, 'rgba(80,200,20,0.4)');
+    poolGrad.addColorStop(1, 'rgba(40,120,10,0.1)');
+    g.fillStyle = poolGrad;
+    g.beginPath();
+    g.ellipse(ax, ay, aw, ah, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.shadowBlur = 0;
+
+  // Toxic bubbles
+  for (let i = 0; i < 20; i++) {
+    g.strokeStyle = 'rgba(120,255,40,0.4)';
+    g.lineWidth = 1;
+    const bx = Math.random() * w;
+    const by = groundY + 10 + Math.random() * 100;
+    const br = 2 + Math.random() * 5;
+    g.beginPath();
+    g.arc(bx, by, br, 0, Math.PI * 2);
+    g.stroke();
+  }
+
+  // Mushrooms
+  for (let i = 0; i < 10; i++) {
+    const mx = Math.random() * w;
+    const my = groundY + Math.random() * 40;
+    const ms = 5 + Math.random() * 10;
+    g.fillStyle = ['#aa44ff', '#44dd66', '#ff44aa'][Math.floor(Math.random() * 3)];
+    g.globalAlpha = 0.5 + Math.random() * 0.3;
+    // Cap
+    g.beginPath();
+    g.ellipse(mx, my - ms, ms, ms * 0.6, 0, 0, Math.PI * 2);
+    g.fill();
+    // Stem
+    g.fillStyle = '#8a8a6a';
+    g.fillRect(mx - 2, my - ms * 0.3, 4, ms * 0.8);
+  }
+  g.globalAlpha = 1;
+
+  // Fog at bottom
+  g.fillStyle = 'rgba(60,100,30,0.15)';
+  for (let i = 0; i < 8; i++) {
+    g.beginPath();
+    g.ellipse(Math.random() * w, h - 20 - Math.random() * 60, 100 + Math.random() * 150, 20 + Math.random() * 20, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  drawRocks(g, groundY, w, 8, ['#3a4a20', '#4a5a28', '#2a3515']);
 }
 
 // ============================================================
@@ -898,7 +1478,7 @@ function finishEnemyTurn() {
 function drawBackground() {
   const bgCanvas = bgCanvases[currentBg];
   if (bgCanvas) {
-    ctx.drawImage(bgCanvas, 0, 0, bgCanvas.width, bgCanvas.height, 0, 0, W, H);
+    ctx.drawImage(bgCanvas, 0, 0, W, H);
     const vig = ctx.createRadialGradient(480, 320, 200, 480, 320, 520);
     vig.addColorStop(0, 'rgba(0,0,0,0)');
     vig.addColorStop(1, 'rgba(0,0,0,0.45)');
